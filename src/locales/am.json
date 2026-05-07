@@ -1,0 +1,37 @@
+{
+    "fields": {
+        "first_name": "የመጀመሪያ ስም",
+        "last_name": "የአባት ስም",
+        "username": "የተጠቃሚ ስም",
+        "email": "ኢሜይል",
+        "phone_number": "ስልክ ቁጥር",
+        "password": "የይለፍ ቃል",
+        "currentPassword": "የአሁኑ የይለፍ ቃል",
+        "newPassword": "አዲስ የይለፍ ቃል",
+        "language_preference": "የቋንቋ ምርጫ",
+        "role_description_admin": "የአስተዳዳሪ ሚና",
+        "role_description_default": "የተፈጠረ ነባሪ ሚና"
+    },
+    "errors": {
+        "unauthorized": "ያልተፈቀደ መዳረሻ። እባክዎ ይግቡ።",
+        "user_not_found": "ተጠቃሚው አልተገኘም።",
+        "invalid_credentials": "የተሳሳተ ስልክ ቁጥር ወይም የይለፍ ቃል::",
+        "account_pending": "ይህ መለያ እስካሁን ንቁ አይደለም። ከመግባትዎ በፊት የመድረክ አስተዳዳሪ የምዝገባዎን ማጽደቅ እንዲጠብቁ።",
+        "account_deactivated": "ይህ መለያ ተሰናክሏል። የድርጅትዎን አስተዳዳሪ ያግኙ።",
+        "current_password_incorrect": "የአሁኑ የይለፍ ቃል ትክክል አይደለም።",
+        "internal_error": "የውስጥ አገልጋይ ስህተት። እባክዎ ቆይተው እንደገና ይሞክሩ።",
+        "phone_exists": "ከዚህ ስልክ ቁጥር ጋር የተያያዘ ተጠቃሚ ቀድሞውኑ አለ።",
+        "username_exists": "ከዚህ የተጠቃሚ ስም ጋር የተያያዘ ተጠቃሚ ቀድሞውኑ አለ።",
+        "email_exists": "ከዚህ ኢሜይል ጋር የተያያዘ ተጠቃሚ ቀድሞውኑ አለ።",
+        "field_required": "{{field}} ያስፈልጋል።",
+        "min_length": "{{field}} ቢያንስ {{min}} ቁምፊዎች مሆን አለበት።",
+        "max_length": "{{field}} ከ {{max}} ቁምፊዎች መብለጥ የለበትም።",
+        "invalid_uuid": "መለያው ትክክለኛ UUID መሆን አለበት።"
+    },
+    "success": {
+        "user_registered": "ተጠቃሚው በተሳካ ሁኔታ ተመዝግቧል።",
+        "profile_updated": "መገለጫዎ በተሳካ ሁኔታ ታድሷል።",
+        "password_updated": "የይለፍ ቃል በተሳካ ሁኔታ ተቀይሯል።",
+        "password_reset_admin": "የይለፍ ቃል በተሳካ ሁኔታ ወደ Password123 ተቀይሯል"
+    }
+}

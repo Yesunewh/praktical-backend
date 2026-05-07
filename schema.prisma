@@ -1,0 +1,281 @@
+// =========================================================================
+// ETHIOPIAN MINING ADMINISTRATION SYSTEM - PRISMA DATABASE SCHEMA
+// (Dynamic Configuration Architecture / ዳይናሚክ ኮንፊግሬሽን አርክቴክቸር)
+// =========================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql" 
+  url      = env("DATABASE_URL")
+}
+
+// -------------------------------------------------------------------------
+// 0. የዳይናሚክ ውቅር (DYNAMIC CONFIGURATIONS / SETTINGS)
+// -------------------------------------------------------------------------
+
+model AppSettings {
+  id             String   @id @default("GLOBAL")
+  
+  applicantTypes Json
+  licenseTypes   Json
+  invoiceTypes   Json
+  reportTypes    Json
+  documentTypes  Json     // አዲስ: የዶክመንት አይነቶች (EIA, መታወቂያ...)
+  
+  updatedAt      DateTime @updatedAt
+}
+
+model MineralConfig {
+  id           String @id @default(cuid())
+  code         String @unique 
+  nameAm       String 
+  nameEn       String 
+  
+  royaltyRate  Float  
+  landRentRate Float  
+  
+  isActive     Boolean @default(true)
+  applications Application[]
+}
+
+model ScaleConfig {
+  id              String @id @default(cuid())
+  scaleCode       String @unique 
+  nameAm          String 
+  nameEn          String 
+  
+  minAreaSqm      Float  
+  maxAreaSqm      Float  
+  minProductionM3 Float  
+  maxProductionM3 Float  
+  
+  licenseYears    Int    
+  
+  isActive        Boolean @default(true)
+  applications    Application[]
+}
+
+model PenaltyConfig {
+  id             String @id @default(cuid())
+  tierCode       String @unique 
+  
+  delayDaysMin   Int    
+  delayDaysMax   Int    
+  
+  penaltyPercent Float  
+  isSuspension   Boolean @default(false) 
+  
+  isActive       Boolean @default(true)
+}
+
+// -------------------------------------------------------------------------
+// 1. መገለጫ እና ኃላፊነት (USER & ROLE MANAGEMENT)
+// -------------------------------------------------------------------------
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  fullName     String
+  phoneNumber  String?
+  password     String? // Hashed
+
+  role         Role     @default(APPLICANT)
+  subCity      String?  
+  
+  isActive     Boolean  @default(true)
+  
+  updatedAt    DateTime @updatedAt
+  createdAt    DateTime @default(now())
+
+  applications Application[] @relation("ApplicantApplications")
+  inspections  Inspection[]  @relation("InspectorInspections")
+}
+
+enum Role {
+  APPLICANT
+  SUB_CITY_EXPERT
+  HEAD_OFFICE_EXPERT
+  INSPECTOR
+  FINANCE_OFFICER
+  SYS_ADMIN
+}
+
+
+// -------------------------------------------------------------------------
+// 2. ዋና ማመልከቻ (FORM 1 & FORM 2 - APPLICATION)
+// -------------------------------------------------------------------------
+model Application {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation("ApplicantApplications", fields: [userId], references: [id])
+  
+  // ሀ. የአመልካች መረጃ
+  applicantName   String
+  applicantType   String   
+  isFarmerAssoc   Boolean  @default(false) // አዲስ፡ አርሶ አደር ማህበር መሆኑን የሚለይ
+  tinNumber       String?  
+  phoneNumber     String
+  address         String?
+  
+  // ለ. የማዕድን እና ቀመር
+  mineralId       String
+  mineral         MineralConfig @relation(fields: [mineralId], references: [id])
+  
+  scaleId         String
+  scale           ScaleConfig   @relation(fields: [scaleId], references: [id])
+  
+  licenseType     String        
+  
+  // ሐ. የቦታ እና ምርት ስፋት
+  areaSqm         Float   
+  annualProdM3    Float   
+  
+  subCity         String  
+  woreda          String  
+  specificName    String? 
+
+  // መ. የሰው ሀይል
+  profMale        Int      @default(0) 
+  profFemale      Int      @default(0) 
+  laborMale       Int      @default(0) 
+  laborFemale     Int      @default(0) 
+  
+  // ሠ. ማመልከቻው ያለበት ደረጃ
+  status          AppStatus @default(SUBMITTED)
+  
+  submittedAt     DateTime  @default(now())
+  inspectedAt     DateTime?
+  approvedAt      DateTime? 
+  expiresAt       DateTime? 
+
+  // ረ. ግንኙነቶች
+  attachments     Attachment[] // አዲስ፡ ዶክመንት ማያያዣ
+  inspections     Inspection[]
+  invoices        Invoice[]
+  reports         ProductionReport[]
+
+  updatedAt       DateTime @updatedAt
+  createdAt       DateTime @default(now())
+}
+
+// አዲስ፡ ሰነዶች ማያያዣ (EIA, Feasibility, ID Copy)
+model Attachment {
+  id             String   @id @default(cuid())
+  applicationId  String
+  application    Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  
+  documentType   String   // (Dynamic from AppSettings.documentTypes)
+  fileUrl        String   // AWS S3 / Local storage link
+  
+  uploadedAt     DateTime @default(now())
+}
+
+enum AppStatus {
+  SUBMITTED           
+  UNDER_REVIEW        
+  FIELD_INSPECTION    
+  PENDING_PAYMENT     
+  ACTIVE              
+  EXPIRED             
+  SUSPENDED           
+  REJECTED            
+}
+
+
+// -------------------------------------------------------------------------
+// 3. የመስክ ምልከታ ሪፖርት መዝገብ (FORM 3 & FORM 4 - INSPECTION)
+// -------------------------------------------------------------------------
+model Inspection {
+  id             String      @id @default(cuid())
+  applicationId  String
+  application    Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  
+  inspectorId    String
+  inspector      User        @relation("InspectorInspections", fields: [inspectorId], references: [id])
+  
+  gpsCoordinates Json?       
+  
+  distToHousing  Float?      
+  distToRoad     Float?      
+  distToRiver    Float?      
+  distToForest   Float?      
+  distToIndustry Float?      
+  
+  geologyReport  String? @db.Text  
+  positiveImpact String? @db.Text  
+  negativeImpact String? @db.Text  
+  
+  inspectorComment String? @db.Text  
+  managerDecision  String? @db.Text  
+  isApproved       Boolean @default(false)
+  
+  updatedAt      DateTime @updatedAt
+  createdAt      DateTime @default(now())
+}
+
+
+// -------------------------------------------------------------------------
+// 4. ክፍያ ፣ ሮያሊቲ ፣ እና ቅጣት (FORM 7 - INVOICE & PAYMENTS)
+// -------------------------------------------------------------------------
+model Invoice {
+  id            String      @id @default(cuid())
+  invoiceNumber String      @unique 
+  
+  applicationId String
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  
+  invoiceType   String      
+  amount        Float       
+  
+  description   String?     
+  
+  status        PaymentStatus @default(UNPAID)
+  
+  paidAt        DateTime?
+  updatedAt     DateTime @updatedAt
+  createdAt     DateTime @default(now())
+}
+
+enum PaymentStatus {
+  UNPAID
+  PAID
+  CANCELLED
+}
+
+
+// -------------------------------------------------------------------------
+// 5. የምርት ክትትል ሪፖርት (FORM 5 & FORM 6 - PRODUCTION REPORTS)
+// -------------------------------------------------------------------------
+model ProductionReport {
+  id            String      @id @default(cuid())
+  applicationId String
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  
+  reportType    String      
+  
+  year          Int         
+  month         Int?        
+  quarter       Int?        
+  
+  // Monthly Data
+  receiptCount  Int?        
+  salesAmount   Float?      
+  productionM3  Float       
+  
+  // Quarterly Data
+  jobsCreatedMale   Int?    @default(0) 
+  jobsCreatedFemale Int?    @default(0) 
+  
+  machineryUsed     Json?   
+  rehabAreaSqm      Float?  
+  problemsFaced     String? @db.Text 
+  
+  linkageName       String? 
+  linkageAmount     Float?  
+  
+  hasCornerstone    Boolean @default(false) // አዲስ፡ የወሰን ችካል ተደርጓል?
+
+  createdAt     DateTime @default(now())
+}

@@ -1,0 +1,37 @@
+{
+    "fields": {
+        "first_name": "Maqaa Jalqabaa",
+        "last_name": "Maqaa Abbaa",
+        "username": "Maqaa Fayyadamaa",
+        "email": "Iimeelii",
+        "phone_number": "Lakkoofsa Bilbilaa",
+        "password": "Jecha Icchitii",
+        "currentPassword": "Jecha Icchitii Ammee",
+        "newPassword": "Jecha Icchitii Haaraa",
+        "language_preference": "Filannoo Afaanii",
+        "role_description_admin": "Gahee Bulchaa",
+        "role_description_default": "Gahee baramaa uumame"
+    },
+    "errors": {
+        "unauthorized": "Hayyamni hin kennamne. Maaloo seenaa.",
+        "user_not_found": "Fayyadamaan hin argamne.",
+        "invalid_credentials": "Lakkoofsa bilbilaa ykn jecha icchitii dogoggora.",
+        "account_pending": "Akkaawuntiin kun ammallee hin hojjetu. Dura seenuuf bulchaa waltajjii galmaa kee mirkaneessuu eegi.",
+        "account_deactivated": "Akkaawuntiin kun dhaabbateera. Bulchaa dhaabbata kee qunnami.",
+        "current_password_incorrect": "Jecha icchitii ammee dogoggora.",
+        "internal_error": "Dogoggora keessoo. Maaloo yeroo booda irra deebi'ii yaali.",
+        "phone_exists": "Fayyadamaan lakkoofsa bilbilaa kanaan galmaa'e jira.",
+        "username_exists": "Fayyadamaan maqaa fayyadamaa kanaan galmaa'e jira.",
+        "email_exists": "Fayyadamaan iimeelii kanaan galmaa'e jira.",
+        "field_required": "{{field}} barbaachisaadha.",
+        "min_length": "{{field}} qubeewwan yoo xiqqaate {{min}} qabaachuu qaba.",
+        "max_length": "{{field}} qubeewwan {{max}} caaluu hin qabu.",
+        "invalid_uuid": "Maddi UUID sirrii ta'uu qaba"
+    },
+    "success": {
+        "user_registered": "Fayyadamaan milkaa'inaan galmaa'eera.",
+        "profile_updated": "Proofayiliin milkaa'inaan haaromeera.",
+        "password_updated": "Jechi icchitii milkaa'inaan jijjiirameera.",
+        "password_reset_admin": "Jechi icchitii milkaa'inaan gara Password123 tti jijjiirameera"
+    }
+}
