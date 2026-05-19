@@ -1,22 +1,39 @@
 const gamificationService = require("../services/gamificationService");
 const { AppError } = require("../middlewares/errorMiddleware");
+const {
+  SUPER_ADMIN_BASELINE_ROLE_NAME,
+  ORG_ADMIN_BASELINE_ROLE_NAME,
+  DEPT_ADMIN_BASELINE_ROLE_NAME,
+  BRANCH_UNIT_BASELINE_ROLE_NAME,
+} = require("../config/systemBaselineRoles");
 
 const listChallenges = async (req, res, next) => {
   try {
-    const { category, difficulty, org_id, dept_id, unit_id, for_exam_bank } = req.query;
+    const { category, difficulty, search, page, limit, org_id, dept_id, unit_id, for_exam_bank, scopeFilter, statusFilter } = req.query;
     const examBank = for_exam_bank === "1" || for_exam_bank === "true";
-    const ut = req.user?.user_type;
+    const actorRoleName = req.user?.role?.name;
+    const isPlatformAdmin = req.user?.org_id === null && actorRoleName === SUPER_ADMIN_BASELINE_ROLE_NAME;
+    const isSuperAdmin = !!req.user?.isSuperAdmin;
 
     if (examBank) {
-      if (!["SUPERADMIN", "ORG_ADMIN", "DEPT_ADMIN", "UNIT_ADMIN"].includes(ut)) {
+      const allowedAdminRoles = [
+        SUPER_ADMIN_BASELINE_ROLE_NAME,
+        ORG_ADMIN_BASELINE_ROLE_NAME,
+        DEPT_ADMIN_BASELINE_ROLE_NAME,
+        BRANCH_UNIT_BASELINE_ROLE_NAME,
+      ];
+      if (!isSuperAdmin && !allowedAdminRoles.includes(actorRoleName)) {
         return next(new AppError("Forbidden", 403));
       }
-      const filterOrgId = ut === "SUPERADMIN" ? org_id || null : null;
-      const filterDeptId = ut === "SUPERADMIN" ? dept_id || null : null;
-      const filterUnitId = ut === "SUPERADMIN" ? unit_id || null : null;
+      const filterOrgId = (isPlatformAdmin || isSuperAdmin) ? org_id || null : null;
+      const filterDeptId = (isPlatformAdmin || isSuperAdmin) ? dept_id || null : null;
+      const filterUnitId = (isPlatformAdmin || isSuperAdmin) ? unit_id || null : null;
       const list = await gamificationService.listChallengesAdmin({
         category,
         difficulty,
+        search,
+        page,
+        limit,
         viewer: req.user,
         filterOrgId,
         filterDeptId,
@@ -25,18 +42,28 @@ const listChallenges = async (req, res, next) => {
       return res.json({ success: true, challenges: list });
     }
 
-    const filterOrgId = ut === "SUPERADMIN" ? org_id || null : null;
-    const filterDeptId = ut === "SUPERADMIN" ? dept_id || null : null;
-    const filterUnitId = ut === "SUPERADMIN" ? unit_id || null : null;
+    const filterOrgId = (isPlatformAdmin || isSuperAdmin) ? org_id || null : null;
+    const filterDeptId = (isPlatformAdmin || isSuperAdmin) ? dept_id || null : null;
+    const filterUnitId = (isPlatformAdmin || isSuperAdmin) ? unit_id || null : null;
     const list = await gamificationService.listChallenges({
       category,
       difficulty,
+      search,
+      page,
+      limit,
+      scopeFilter,
+      statusFilter,
       viewer: req.user,
       filterOrgId,
       filterDeptId,
       filterUnitId,
     });
-    res.json({ success: true, challenges: list });
+    
+    if (list && list.data) {
+      res.json({ success: true, challenges: list.data, total: list.total, page: list.page, totalPages: list.totalPages });
+    } else {
+      res.json({ success: true, challenges: list });
+    }
   } catch (e) {
     next(e);
   }
@@ -147,9 +174,13 @@ const achievementsMe = async (req, res, next) => {
 const leaderboard = async (req, res, next) => {
   try {
     const { org_id, dept_id, unit_id, limit, scope, offset } = req.query;
+    const actorRoleName = req.user?.role?.name;
+    const isPlatformAdmin = req.user?.org_id === null && actorRoleName === SUPER_ADMIN_BASELINE_ROLE_NAME;
+    const isSuperAdmin = !!req.user?.isSuperAdmin;
+
     let sc = scope;
     if (!sc) {
-      sc = req.user?.user_type === "SUPERADMIN" ? "global" : "org";
+      sc = (isPlatformAdmin || isSuperAdmin) ? "global" : "org";
     }
     const orgId = org_id || req.user?.org_id;
     const norm = gamificationService.normalizeLeaderboardScope(sc);
@@ -225,7 +256,7 @@ const removeChallenge = async (req, res, next) => {
 
 const myTrainingAssignments = async (req, res, next) => {
   try {
-    const assignments = await gamificationService.listMyTrainingAssignments(req.user);
+    const assignments = await gamificationService.listMyTrainingAssignments(req.user, req.query || {});
     res.json({ success: true, assignments });
   } catch (e) {
     next(e);
@@ -268,6 +299,24 @@ const adminTrainingSummary = async (req, res, next) => {
   }
 };
 
+const getAssignmentReport = async (req, res, next) => {
+  try {
+    const report = await gamificationService.getAssignmentDetailedReport(req.user, req.params.id);
+    res.json({ success: true, ...report });
+  } catch (e) {
+    next(e);
+  }
+};
+
+const topRatedChallenges = async (req, res, next) => {
+  try {
+    const list = await gamificationService.getTopRatedChallenges(req.user, req.query.limit);
+    res.json({ success: true, challenges: list });
+  } catch (e) {
+    next(e);
+  }
+};
+
 module.exports = {
   listChallenges,
   getChallenge,
@@ -290,4 +339,6 @@ module.exports = {
   listTrainingAssignmentsAdmin,
   removeTrainingAssignment,
   adminTrainingSummary,
+  getAssignmentReport,
+  topRatedChallenges,
 };

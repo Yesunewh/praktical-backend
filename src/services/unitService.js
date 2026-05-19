@@ -7,6 +7,24 @@ class UnitService {
     if (data.level > 5 || data.level < 1) {
       throw new Error("Unit levels must be between 1 and 5.");
     }
+
+    if (data.level > 1) {
+      const previousLevel = await UnitType.findOne({ where: { level: data.level - 1, org_id: orgId } });
+      if (!previousLevel) {
+        throw new Error(`You must define Level ${data.level - 1} before you can define Level ${data.level}.`);
+      }
+    }
+
+    const existingName = await UnitType.findOne({ where: { name: data.name, org_id: orgId } });
+    if (existingName) {
+      throw new Error(`A unit type with the name '${data.name}' already exists.`);
+    }
+
+    const existingLevel = await UnitType.findOne({ where: { level: data.level, org_id: orgId } });
+    if (existingLevel) {
+      throw new Error(`A unit type for level ${data.level} already exists.`);
+    }
+
     return await UnitType.create({ ...data, org_id: orgId });
   }
 
@@ -101,8 +119,16 @@ class UnitService {
    * Enforce who may create which structural level (org-wide vs. under assigned branch only).
    */
   async assertActorMayCreateUnit(actor, orgId, data) {
-    const actorType = actor.user_type;
-    if (actorType === "SUPERADMIN") return;
+    const {
+      SUPER_ADMIN_BASELINE_ROLE_NAME,
+      ORG_ADMIN_BASELINE_ROLE_NAME,
+      BRANCH_UNIT_BASELINE_ROLE_NAME,
+    } = require("../config/systemBaselineRoles");
+
+    const actorRoleName = actor.role?.name;
+    const isSuperAdmin = actor.org_id === null && actorRoleName === SUPER_ADMIN_BASELINE_ROLE_NAME;
+
+    if (isSuperAdmin || actor.isSuperAdmin) return;
 
     const newType = await UnitType.findOne({
       where: { id: data.type_id, org_id: orgId },
@@ -112,7 +138,7 @@ class UnitService {
       throw err;
     }
 
-    if (actorType === "ORG_ADMIN") {
+    if (actorRoleName === ORG_ADMIN_BASELINE_ROLE_NAME) {
       // Org admins can only create top-level locations
       if (data.parent_id) {
         const err = new Error("Organization admins may only create top-level locations. Sub-locations must be added by their respective branch admin.");
@@ -120,12 +146,14 @@ class UnitService {
         throw err;
       }
       if (newType.level !== 1) {
-        throw new Error("Top-level locations must use your organization’s level-1 terminology.");
+        const err = new Error("Top-level locations must use your organization's level-1 terminology.");
+        err.statusCode = 403;
+        throw err;
       }
       return;
     }
 
-    if (actorType === "UNIT_ADMIN") {
+    if (actorRoleName === BRANCH_UNIT_BASELINE_ROLE_NAME) {
       if (!actor.unit_id) {
         const err = new Error("Your account is not assigned to a branch.");
         err.statusCode = 403;
@@ -150,7 +178,7 @@ class UnitService {
       return;
     }
 
-    const err = new Error("Forbidden");
+    const err = new Error("Forbidden: You do not have the required administrative role.");
     err.statusCode = 403;
     throw err;
   }
@@ -225,7 +253,16 @@ class UnitService {
   }
 
   async assertActorMayEditUnit(actor, unitId, orgId) {
-    if (actor.user_type === "SUPERADMIN") return;
+    const {
+      SUPER_ADMIN_BASELINE_ROLE_NAME,
+      ORG_ADMIN_BASELINE_ROLE_NAME,
+      BRANCH_UNIT_BASELINE_ROLE_NAME,
+    } = require("../config/systemBaselineRoles");
+
+    const actorRoleName = actor.role?.name;
+    const isSuperAdmin = actor.org_id === null && actorRoleName === SUPER_ADMIN_BASELINE_ROLE_NAME;
+
+    if (isSuperAdmin || actor.isSuperAdmin) return;
 
     const targetUnit = await OrganizationalUnit.findOne({
       where: { id: unitId, org_id: orgId },
@@ -233,20 +270,18 @@ class UnitService {
     });
     if (!targetUnit) throw new Error("Unit not found or access denied.");
 
-    if (actor.user_type === "ORG_ADMIN") {
+    if (actorRoleName === ORG_ADMIN_BASELINE_ROLE_NAME) {
       // Org admins can only edit top-level (level 1) branches
       if (targetUnit.Type && targetUnit.Type.level === 1) return;
       throw new Error("Organization admins may only edit top-level branches. Sub-branches must be managed by their parent branch admin.");
     }
 
-    if (actor.user_type === "UNIT_ADMIN") {
-      if (String(unitId) === String(actor.unit_id)) {
-        throw new Error("You cannot edit your own branch name. Please contact your organization administrator.");
-      }
-      // Can only edit direct children
+    if (actorRoleName === BRANCH_UNIT_BASELINE_ROLE_NAME) {
+      // Can edit their own branch
+      if (String(unitId) === String(actor.unit_id)) return;
+      // Can edit direct children (one level below)
       if (String(targetUnit.parent_id) === String(actor.unit_id)) return;
-      
-      throw new Error("You may only edit branches directly assigned under yours (one level below).");
+      throw new Error("You may only edit your own branch or branches directly under yours.");
     }
     throw new Error("Access denied.");
   }

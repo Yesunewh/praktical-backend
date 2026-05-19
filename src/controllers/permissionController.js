@@ -37,13 +37,14 @@ exports.bulkAllocate = async (req, res) => {
 
 exports.getAvailablePermissions = async (req, res) => {
   try {
-    const orgId = req.user.user_type === "SUPERADMIN" ? req.query.org_id : req.user.org_id;
+    const isSuperAdmin = req.user.isSuperAdmin;
+    const orgId = isSuperAdmin ? req.query.org_id : req.user.org_id;
     const unitId = req.user.unit ? req.user.unit.id : null;
 
-    let permissions = await permissionService.getAvailablePermissions(orgId, unitId, req.user.user_type);
+    let permissions = await permissionService.getAvailablePermissions(orgId, unitId, req.user.role?.name);
     // SuperAdmins are not scoped by org allocations for this mask — otherwise every
     // permission stays "locked" when no SYSTEM grants exist yet (common on fresh DB).
-    if (req.user.user_type === "SUPERADMIN") {
+    if (isSuperAdmin) {
       permissions = applySuperAdminPermissionsResponseMask(permissions);
     }
     res.status(200).json({ success: true, data: permissions });

@@ -1,20 +1,21 @@
 const express = require("express");
 const router = express.Router();
 const permissionController = require("../controllers/permissionController");
-const { protect, authorize } = require("../middlewares/authMiddleware");
+const { protect, assignmentMiddleware, permissionMiddleware } = require("../middlewares/authMiddleware");
 
 router.use(protect);
+router.use(assignmentMiddleware);
 
 // Get the boolean mapped list of permissions. All admins can fetch this.
-router.get("/", permissionController.getAvailablePermissions);
+router.get("/", permissionMiddleware("MANAGE_PERMISSIONS"), permissionController.getAvailablePermissions);
 
 // Super Admin Only: Push fixed strings
-router.post("/", authorize("SUPERADMIN"), permissionController.pushPermission);
+router.post("/", permissionMiddleware("MANAGE_SYSTEM"), permissionController.pushPermission);
 
 // Scoped allocation of permissions
-router.post("/:permissionId/allocate", authorize("SUPERADMIN", "ORG_ADMIN", "UNIT_ADMIN"), permissionController.allocatePermission);
+router.post("/:permissionId/allocate", permissionMiddleware("MANAGE_PERMISSIONS"), permissionController.allocatePermission);
 
 // Bulk allocation per Org
-router.post("/organizations/:orgId/bulk", authorize("SUPERADMIN"), permissionController.bulkAllocate);
+router.post("/organizations/:orgId/bulk", permissionMiddleware("MANAGE_TENANTS"), permissionController.bulkAllocate);
 
 module.exports = router;

@@ -20,102 +20,170 @@ const {
   adminDeactivateUserService,
   adminActivateUserService,
   adminUpdateUserScopeService,
+  getRegistrationRejectionLogsService,
 } = require("../services/userService");
 const User = require("../models/userModel");
-const { OrganizationalUnit } = require("../models");
+const { OrganizationalUnit, Role, Permission, Department } = require("../models");
 const unitService = require("../services/unitService");
 const { AppError } = require("../middlewares/errorMiddleware");
 
 /**
  * Admin creates a user via POST /users: org / department / branch locked to the actor (not superadmin).
  */
+const {
+  ORG_ADMIN_BASELINE_ROLE_NAME,
+  BRANCH_UNIT_BASELINE_ROLE_NAME,
+  DEPT_ADMIN_BASELINE_ROLE_NAME,
+  SUPER_ADMIN_BASELINE_ROLE_NAME,
+} = require("../config/systemBaselineRoles");
+
+/**
+ * Admin creates a user via POST /users: org / department / branch locked to the actor (not superadmin).
+ */
 async function resolveScopedRegistration(actor, body) {
   const merged = { ...body };
-  const ut = merged.user_type || "STAFF";
+  const targetRoleName = body.target_role_name || "STAFF"; // Fallback if no specific role name provided in request
 
-  if (ut === "SUPERADMIN" && actor.user_type !== "SUPERADMIN") {
-    throw new AppError("Forbidden", 403);
+  // Normalize unit_id and dept_id
+  if (merged.unit_id === "null" || merged.unit_id === "") {
+    merged.unit_id = null;
   }
-  if (["SUPERADMIN", "ORG_ADMIN"].includes(ut) && actor.user_type !== "SUPERADMIN") {
-    throw new AppError("You cannot assign that platform or org role", 403);
+  if (merged.dept_id === "null" || merged.dept_id === "") {
+    merged.dept_id = null;
   }
 
-  const at = actor.user_type;
-
-  if (at === "SUPERADMIN") {
+  // If the actor is a Super Admin, they can do anything
+  if (actor.role?.name === SUPER_ADMIN_BASELINE_ROLE_NAME || (actor.isSuperAdmin && !actor.org_id)) {
+    if (!merged.role_id && merged.user_type === "ORG_ADMIN") {
+      const { Role } = require("../models");
+      const { ORG_ADMIN_BASELINE_ROLE_NAME } = require("../config/systemBaselineRoles");
+      const orgRole = await Role.findOne({
+        where: { name: ORG_ADMIN_BASELINE_ROLE_NAME, org_id: null }
+      });
+      if (orgRole) {
+        merged.role_id = orgRole.id;
+      }
+    }
     return merged;
   }
 
-  if (at === "ORG_ADMIN") {
+  const actorRoleName = actor.role?.name;
+
+  if (actorRoleName === ORG_ADMIN_BASELINE_ROLE_NAME) {
     if (!actor.org_id) {
       throw new AppError("Your account has no organization scope", 403);
     }
-    if (body.org_id && String(body.org_id) !== String(actor.org_id)) {
+    if (merged.org_id && String(merged.org_id) !== String(actor.org_id)) {
       throw new AppError("Cannot assign another organization", 403);
     }
 
+    // Check if the target role is a Branch Admin
+    let isTargetBranchAdmin = false;
+    if (merged.role_id) {
+      const targetRole = await Role.findByPk(merged.role_id);
+      if (targetRole && targetRole.name === BRANCH_UNIT_BASELINE_ROLE_NAME) {
+        isTargetBranchAdmin = true;
+      }
+    }
+
+    if (isTargetBranchAdmin) {
+      if (!merged.unit_id) {
+        throw new AppError("A branch / unit must be assigned for a Branch Admin.", 400);
+      }
+      const unit = await OrganizationalUnit.findOne({ where: { id: merged.unit_id, org_id: actor.org_id } });
+      if (!unit) {
+        throw new AppError("Invalid branch / unit for your organization.", 400);
+      }
+      if (unit.parent_id !== null) {
+        throw new AppError("Forbidden: Organization administrators can only assign Branch Admins to top-level units.", 403);
+      }
+      if (merged.dept_id) {
+        const dept = await Department.findByPk(merged.dept_id);
+        if (!dept) {
+          throw new AppError("Department not found in your organization.", 404);
+        }
+        if (dept.unit_id !== merged.unit_id) {
+          throw new AppError("Forbidden: The assigned department must belong to the assigned branch.", 403);
+        }
+      }
+    } else {
+      if (merged.unit_id !== undefined && merged.unit_id !== null && merged.unit_id !== "") {
+        throw new AppError("Forbidden: Organization administrators can only assign users at the organization level.", 403);
+      }
+      if (merged.dept_id) {
+        const dept = await Department.findByPk(merged.dept_id);
+        if (!dept) {
+          throw new AppError("Department not found in your organization.", 404);
+        }
+        if (dept.unit_id !== null) {
+          throw new AppError("Forbidden: Organization administrators cannot assign users to branch-level departments.", 403);
+        }
+      }
+      merged.unit_id = null;
+    }
+
     merged.org_id = actor.org_id;
-    merged.user_type = ut;
     return merged;
   }
 
-  if (at === "DEPT_ADMIN") {
+  if (actorRoleName === DEPT_ADMIN_BASELINE_ROLE_NAME) {
     if (!actor.org_id || !actor.dept_id) {
       throw new AppError("Your account has no department scope", 403);
     }
-    if (!["STAFF", "EXTERNAL"].includes(ut)) {
-      throw new AppError("You can only create staff or applicants in your department", 403);
-    }
+    
     merged.org_id = actor.org_id;
     merged.dept_id = actor.dept_id;
     merged.unit_id = null;
-    merged.user_type = ut;
     return merged;
   }
 
-  if (at === "UNIT_ADMIN") {
+  if (actorRoleName === BRANCH_UNIT_BASELINE_ROLE_NAME) {
     if (!actor.org_id || !actor.unit_id) {
       throw new AppError("Your account has no branch scope", 403);
     }
-    if (body.org_id && String(body.org_id) !== String(actor.org_id)) {
+    if (merged.org_id && String(merged.org_id) !== String(actor.org_id)) {
       throw new AppError("Cannot assign another organization", 403);
     }
-    
-    const targetUnitId = body.unit_id || actor.unit_id;
-    
-    // If creating/managing an admin
-    if (ut === "UNIT_ADMIN") {
-      // Cannot manage admins for their own branch
-      if (String(targetUnitId) === String(actor.unit_id)) {
-        throw new AppError("You cannot manage administrators for your own branch. This must be handled by your parent branch administrator.", 403);
-      }
-      // Must be a direct child
-      const targetUnit = await OrganizationalUnit.findOne({ where: { id: targetUnitId, org_id: actor.org_id } });
-      if (!targetUnit || String(targetUnit.parent_id) !== String(actor.unit_id)) {
-        throw new AppError("You may only manage administrators for branches directly under yours.", 403);
-      }
-    } else {
-      // For regular staff, allow their own branch or direct sub-branches
-      if (String(targetUnitId) !== String(actor.unit_id)) {
-        const targetUnit = await OrganizationalUnit.findOne({ where: { id: targetUnitId, org_id: actor.org_id } });
-        if (!targetUnit || String(targetUnit.parent_id) !== String(actor.unit_id)) {
-          throw new AppError("Users must be assigned to your branch or a direct sub-branch", 403);
-        }
-      }
-    }
-    
-    merged.unit_id = targetUnitId;
 
-    if (!["STAFF", "EXTERNAL", "UNIT_ADMIN"].includes(ut)) {
-      throw new AppError("You cannot assign that role", 403);
+    // Determine the effective unit: must be actor's own branch or a direct sub-branch
+    const targetUnitId = merged.unit_id || actor.unit_id;
+
+    const targetUnit = await OrganizationalUnit.findOne({ where: { id: targetUnitId, org_id: actor.org_id } });
+    if (!targetUnit) {
+      throw new AppError("Target branch not found in your organization.", 404);
     }
-    
+
+    if (String(targetUnitId) !== String(actor.unit_id)) {
+      // Ensure target unit is a direct child of the actor's unit
+      if (String(targetUnit.parent_id) !== String(actor.unit_id)) {
+        throw new AppError("Users must be assigned to your branch or a direct sub-branch", 403);
+      }
+    }
+
+
+
+    // ✅ Validate dept_id: the department must belong to the resolved branch (targetUnitId)
+    if (merged.dept_id) {
+      const { Department } = require("../models");
+      const dept = await Department.findOne({ where: { id: merged.dept_id, org_id: actor.org_id } });
+      if (!dept) {
+        throw new AppError("Department not found in your organization.", 404);
+      }
+      const deptUnitId = dept.unit_id ? String(dept.unit_id) : null;
+      if (deptUnitId !== String(targetUnitId)) {
+        throw new AppError(
+          "The selected department does not belong to the assigned branch. You may only assign users to departments within your branch.",
+          403
+        );
+      }
+    }
+
+    merged.unit_id = targetUnitId;
     merged.org_id = actor.org_id;
-    merged.user_type = ut;
     return merged;
   }
 
-  throw new AppError("Forbidden", 403);
+  throw new AppError("Forbidden: You do not have an administrative role assigned.", 403);
 }
 
 /** Match stored 10-digit Ethiopian-style numbers; trim spaces and common prefixes. */
@@ -183,22 +251,14 @@ const userRegistrationController = async (req, res, next) => {
       payload = await resolveScopedRegistration(req.user, req.body);
     }
 
-    if (!req.allowFirstAdminBootstrap && req.user.user_type === "ORG_ADMIN") {
+    if (!req.allowFirstAdminBootstrap && req.user.role?.name === ORG_ADMIN_BASELINE_ROLE_NAME) {
       const rid = payload.role_id;
       if (rid == null || String(rid).trim() === "") {
         throw new AppError("Role is required for users created by an organization administrator.", 400);
       }
-      try {
-        // Default to root unit if none provided, but don't crash if no units exist yet
-        if (!payload.unit_id) {
-          payload.unit_id = await unitService.getOrgRootUnitId(req.user.org_id);
-        }
-      } catch (err) {
-        if (err.statusCode === 400 && err.message.includes("No organizational unit hierarchy exists")) {
-          payload.unit_id = null;
-        } else {
-          throw err;
-        }
+      const targetRole = await Role.findByPk(rid);
+      if (!targetRole || targetRole.name !== BRANCH_UNIT_BASELINE_ROLE_NAME) {
+        payload.unit_id = null;
       }
     }
 
@@ -212,7 +272,6 @@ const userRegistrationController = async (req, res, next) => {
       language_preference,
       org_id,
       dept_id,
-      user_type,
       unit_id,
       status,
       role_id,
@@ -228,16 +287,48 @@ const userRegistrationController = async (req, res, next) => {
       language_preference,
       org_id,
       dept_id || null,
-      user_type,
       unit_id,
       status,
       role_id,
     );
 
+    const userJson = newUser.toJSON();
+    delete userJson.password;
+
+    // --- FETCH ROLE AND PERMISSIONS FOR RESPONSE ---
+    let roleName = "N/A";
+    let permissions = [];
+
+    if (role_id) {
+      const role = await Role.findByPk(role_id, {
+        include: [{ model: Permission, attributes: ["name"] }]
+      });
+      if (role) {
+        roleName = role.name;
+        permissions = role.Permissions.map(p => p.name);
+      }
+    } else if (newUser.org_id === null) {
+      roleName = "Super Admin";
+      const allPerms = await Permission.findAll({ attributes: ["name"] });
+      permissions = allPerms.map(p => p.name);
+    }
+
+    let user_type = "STAFF";
+    if (roleName === "Super Admin") user_type = "SUPERADMIN";
+    else if (roleName === "Organization Admin") user_type = "ORG_ADMIN";
+    else if (roleName === "Branch Admin") user_type = "UNIT_ADMIN";
+    else if (roleName === "Department Admin") user_type = "DEPT_ADMIN";
+
     res.status(201).json({
       success: true,
       message: req.t("success.user_registered"),
-      user: newUser,
+      user: {
+        ...userJson,
+        roleName,
+        roleDisplayName: roleName,
+        user_type,
+        permissions
+      },
     });
   } catch (error) {
     // Pass the error to the global error handler using next(error)
@@ -253,9 +344,9 @@ function firstQueryVal(raw) {
 const getAllUsersController = async (req, res, next) => {
   try {
     const actor = req.user;
-    const ut = actor.user_type;
+    const actorRoleName = actor.role?.name;
 
-    if (!["SUPERADMIN", "ORG_ADMIN", "DEPT_ADMIN", "UNIT_ADMIN"].includes(ut)) {
+    if (![SUPER_ADMIN_BASELINE_ROLE_NAME, ORG_ADMIN_BASELINE_ROLE_NAME, DEPT_ADMIN_BASELINE_ROLE_NAME, BRANCH_UNIT_BASELINE_ROLE_NAME].includes(actorRoleName) && !actor.isSuperAdmin) {
       return res.status(403).json({ success: false, message: "Forbidden" });
     }
 
@@ -263,13 +354,13 @@ const getAllUsersController = async (req, res, next) => {
     let dept_id = firstQueryVal(req.query.dept_id);
     let unit_id = firstQueryVal(req.query.unit_id);
 
-    if (ut === "ORG_ADMIN") {
+    if (actorRoleName === ORG_ADMIN_BASELINE_ROLE_NAME) {
       org_id = actor.org_id;
-    } else if (ut === "DEPT_ADMIN") {
+    } else if (actorRoleName === DEPT_ADMIN_BASELINE_ROLE_NAME) {
       org_id = actor.org_id;
       dept_id = actor.dept_id;
       unit_id = null;
-    } else if (ut === "UNIT_ADMIN") {
+    } else if (actorRoleName === BRANCH_UNIT_BASELINE_ROLE_NAME) {
       org_id = actor.org_id;
       const queryUnitId = firstQueryVal(req.query.unit_id);
       if (queryUnitId) {
@@ -298,14 +389,14 @@ const getAllUsersController = async (req, res, next) => {
       });
     }
 
-    if (ut === "UNIT_ADMIN" && !actor.unit_id) {
+    if (actorRoleName === BRANCH_UNIT_BASELINE_ROLE_NAME && !actor.unit_id) {
       return res.status(403).json({
         success: false,
         message: "Unit administrators must have a unit assigned",
       });
     }
 
-    if (ut !== "SUPERADMIN" && !org_id) {
+    if (actorRoleName !== SUPER_ADMIN_BASELINE_ROLE_NAME && !actor.isSuperAdmin && !org_id) {
       return res.status(403).json({ success: false, message: "Forbidden" });
     }
 
@@ -536,7 +627,7 @@ const approveApplicantController = async (req, res, next) => {
 
 const rejectApplicantController = async (req, res, next) => {
   try {
-    await rejectApplicantService(req.user, req.params.userId);
+    await rejectApplicantService(req.user, req.params.userId, req.body.reason);
     res.status(200).json({
       success: true,
       message: "Registration request removed",
@@ -638,9 +729,21 @@ const applicantRegistrationController = async (req, res, next) => {
         user_id: newUser.user_id,
         first_name: newUser.first_name,
         last_name: newUser.last_name,
-        user_type: newUser.user_type,
         status: newUser.status,
       },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const getRegistrationRejectionLogsController = async (req, res, next) => {
+  try {
+    const logs = await getRegistrationRejectionLogsService(req.user);
+    res.status(200).json({
+      success: true,
+      message: "Registration rejection logs retrieved successfully",
+      logs,
     });
   } catch (error) {
     next(error);
@@ -669,4 +772,5 @@ module.exports = {
   deactivateUserController,
   activateUserController,
   adminUpdateUserScopeController,
+  getRegistrationRejectionLogsController,
 };

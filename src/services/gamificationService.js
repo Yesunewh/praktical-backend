@@ -225,6 +225,16 @@ async function listChallenges(filters = {}) {
   let rows = allRows;
   if (filters.category) rows = rows.filter((r) => r.category === filters.category);
   if (filters.difficulty) rows = rows.filter((r) => r.difficulty === filters.difficulty);
+  if (filters.search) {
+    const s = filters.search.toLowerCase();
+    rows = rows.filter((r) => r.title.toLowerCase().includes(s) || (r.description && r.description.toLowerCase().includes(s)));
+  }
+
+  if (filters.scopeFilter && filters.scopeFilter !== 'all') {
+    if (filters.scopeFilter === 'global') rows = rows.filter((r) => !r.org_id);
+    else if (filters.scopeFilter === 'organization') rows = rows.filter((r) => r.org_id && !r.dept_id && !r.unit_id);
+    else if (filters.scopeFilter === 'department') rows = rows.filter((r) => r.dept_id);
+  }
 
   const plainAll = allRows.map((r) => r.get({ plain: true }));
   const uid = filters.viewer?.user_id;
@@ -239,7 +249,7 @@ async function listChallenges(filters = {}) {
 
   const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-  return rows.map((row) => {
+  let result = rows.map((row) => {
     const base = toFrontendChallenge(row);
     const plain = row.get({ plain: true });
     
@@ -263,6 +273,32 @@ async function listChallenges(filters = {}) {
     const lock = evaluateProgressionLockForChallenge(plain, plainAll, passedSet);
     return { ...challengeData, ...lock };
   });
+
+  if (filters.statusFilter && filters.statusFilter !== 'all') {
+    if (filters.statusFilter === 'passed') {
+      result = result.filter(r => passedSet && passedSet.has(r.id));
+    } else if (filters.statusFilter === 'locked') {
+      result = result.filter(r => r.progressionLocked);
+    } else if (filters.statusFilter === 'available') {
+      result = result.filter(r => !r.progressionLocked && (!passedSet || !passedSet.has(r.id)));
+    }
+  }
+
+  const totalCount = result.length;
+  if (filters.page && filters.limit) {
+    const page = parseInt(filters.page, 10);
+    const limit = parseInt(filters.limit, 10);
+    const offset = (page - 1) * limit;
+    result = result.slice(offset, offset + limit);
+    return {
+      data: result,
+      total: totalCount,
+      page,
+      totalPages: Math.ceil(totalCount / limit)
+    };
+  }
+
+  return result;
 }
 
 /** Admin / Exam Bank: visible challenges including inactive (archived), with attempt counts */
@@ -280,7 +316,7 @@ async function listChallengesAdmin(filters = {}) {
     `(SELECT COUNT(*)::int FROM "GamificationAttempts" AS ga WHERE ga.challenge_id = "LearningChallenge"."id")`
   );
 
-  const rows = await LearningChallenge.findAll({
+  let rows = await LearningChallenge.findAll({
     where,
     attributes: {
       include: [[attemptCountSql, "attempt_count"]],
@@ -288,7 +324,12 @@ async function listChallengesAdmin(filters = {}) {
     order: [["updatedAt", "DESC"]],
   });
 
-  return rows.map((row) => {
+  if (filters.search) {
+    const s = filters.search.toLowerCase();
+    rows = rows.filter((r) => r.title.toLowerCase().includes(s) || (r.description && r.description.toLowerCase().includes(s)));
+  }
+
+  let result = rows.map((row) => {
     const plain = row.get({ plain: true });
     const base = toFrontendChallenge(row);
     return {
@@ -301,6 +342,22 @@ async function listChallengesAdmin(filters = {}) {
       updatedAt: plain.updatedAt ? new Date(plain.updatedAt).toISOString() : null,
     };
   });
+
+  const totalCount = result.length;
+  if (filters.page && filters.limit) {
+    const page = parseInt(filters.page, 10);
+    const limit = parseInt(filters.limit, 10);
+    const offset = (page - 1) * limit;
+    result = result.slice(offset, offset + limit);
+    return {
+      data: result,
+      total: totalCount,
+      page,
+      totalPages: Math.ceil(totalCount / limit)
+    };
+  }
+
+  return result;
 }
 
 async function getChallengeById(id, viewer) {
@@ -350,25 +407,52 @@ async function completeChallenge(userId, challengeId, body) {
     );
 
     if (effectivePassed) {
-      const xpGain = challenge.xp_reward || 0;
-      const repGain = challenge.reputation_reward || 0;
-      const newXp = (user.gamification_xp || 0) + xpGain;
-      const newRep = (user.gamification_reputation || 0) + repGain;
-      const { level, xpToNext } = computeLevel(newXp);
-      const { streak, longest, lastActivity } = streakUpdate(user, new Date());
-
-      await user.update(
-        {
-          gamification_xp: newXp,
-          gamification_level: level,
-          gamification_xp_to_next: xpToNext,
-          gamification_reputation: newRep,
-          gamification_streak: streak,
-          gamification_longest_streak: longest,
-          gamification_last_activity: lastActivity,
+      // Check if user already passed this challenge before
+      const alreadyPassed = await GamificationAttempt.findOne({
+        where: {
+          user_id: userId,
+          challenge_id: challengeId,
+          id: { [Op.ne]: attempt.id }, // Exclude the attempt we just created
+          completed_at: { [Op.ne]: null },
+          [Op.or]: [{ passed: true }, { score: { [Op.gte]: PASS_SCORE_PERCENT } }],
         },
-        { transaction: t }
-      );
+        transaction: t,
+      });
+
+      if (!alreadyPassed) {
+        const xpGain = challenge.xp_reward || 0;
+        const repGain = challenge.reputation_reward || 0;
+        const newXp = (user.gamification_xp || 0) + xpGain;
+        const newRep = (user.gamification_reputation || 0) + repGain;
+        const { level, xpToNext } = computeLevel(newXp);
+        const { streak, longest, lastActivity } = streakUpdate(user, new Date());
+
+        await user.update(
+          {
+            gamification_xp: newXp,
+            gamification_level: level,
+            gamification_xp_to_next: xpToNext,
+            gamification_reputation: newRep,
+            gamification_streak: streak,
+            gamification_longest_streak: longest,
+            gamification_last_activity: lastActivity,
+          },
+          { transaction: t }
+        );
+      } else {
+        console.log(`User ${userId} already passed challenge ${challengeId}. Skipping XP rewards.`);
+        // Still update streak even if XP is not awarded? 
+        // Usually streak is for daily activity, so yes, we should update last_activity and streak.
+        const { streak, longest, lastActivity } = streakUpdate(user, new Date());
+        await user.update(
+          {
+            gamification_streak: streak,
+            gamification_longest_streak: longest,
+            gamification_last_activity: lastActivity,
+          },
+          { transaction: t }
+        );
+      }
     }
 
     await user.reload({ transaction: t });
@@ -485,9 +569,13 @@ async function getLeaderboard({ scope, orgId, deptId, unitId, limit = 50, offset
   const where = { status: "ACTIVE" };
 
   if (sc === "branch_compare" || sc === "dept_compare" || sc === "branch_compare_top") {
+    const { SUPER_ADMIN_BASELINE_ROLE_NAME } = require("../config/systemBaselineRoles");
+    const actorRoleName = requester.role?.name;
+    const isPlatformAdmin = requester.org_id === null && actorRoleName === SUPER_ADMIN_BASELINE_ROLE_NAME;
+
     const oid = orgId || requester?.org_id;
     if (!oid) throw new AppError("Aggregated scope requires org_id", 400);
-    if (requester.user_type !== "SUPERADMIN" && requester.org_id !== oid) {
+    if (!isPlatformAdmin && !requester.isSuperAdmin && requester.org_id !== oid) {
       throw new AppError("Forbidden", 403);
     }
 
@@ -516,7 +604,10 @@ async function getLeaderboard({ scope, orgId, deptId, unitId, limit = 50, offset
       ],
       include: [{ model: modelToInclude, attributes: ["id", "name"], required: true }],
       group: [groupByField, `${includeAs}.id`],
-      order: [[sequelize.literal("total_xp"), "DESC"]],
+      order: [
+        [sequelize.literal("total_xp"), "DESC"],
+        [sequelize.literal("user_count"), "DESC"]
+      ],
       limit: Math.min(Number(limit) || 50, 200),
       offset: Number(offset) || 0,
     });
@@ -539,9 +630,13 @@ async function getLeaderboard({ scope, orgId, deptId, unitId, limit = 50, offset
   if (sc === "global") {
     // Global scope is now available to all authenticated users
   } else if (sc === "org") {
+    const { SUPER_ADMIN_BASELINE_ROLE_NAME } = require("../config/systemBaselineRoles");
+    const actorRoleName = requester.role?.name;
+    const isPlatformAdmin = requester.org_id === null && actorRoleName === SUPER_ADMIN_BASELINE_ROLE_NAME;
+
     const oid = orgId || requester?.org_id;
     if (!oid) throw new AppError("Organization scope requires org_id", 400);
-    if (requester.user_type !== "SUPERADMIN" && requester.org_id !== oid) {
+    if (!isPlatformAdmin && !requester.isSuperAdmin && requester.org_id !== oid) {
       throw new AppError("Forbidden", 403);
     }
     where.org_id = oid;
@@ -550,13 +645,22 @@ async function getLeaderboard({ scope, orgId, deptId, unitId, limit = 50, offset
     const uid = unitId || requester?.unit_id;
     if (!oid || !uid) throw new AppError("Unit scope requires org_id and unit_id", 400);
     
-    if (requester.user_type !== "SUPERADMIN") {
+    const unitService = require("./unitService");
+    const {
+      SUPER_ADMIN_BASELINE_ROLE_NAME,
+      ORG_ADMIN_BASELINE_ROLE_NAME,
+      BRANCH_UNIT_BASELINE_ROLE_NAME,
+    } = require("../config/systemBaselineRoles");
+    const actorRoleName = requester.role?.name;
+    const isPlatformAdmin = requester.org_id === null && actorRoleName === SUPER_ADMIN_BASELINE_ROLE_NAME;
+
+    if (!isPlatformAdmin && !requester.isSuperAdmin) {
       if (requester.org_id !== oid) throw new AppError("Forbidden", 403);
       
       // If UNIT_ADMIN, they can see their own subtree. 
       // If they are not UNIT_ADMIN/ORG_ADMIN, they can only see their own branch.
-      const isAuthorized = requester.user_type === "ORG_ADMIN" || 
-                           (requester.user_type === "UNIT_ADMIN" && await unitService.isDescendantOf(uid, requester.unit_id, oid)) ||
+      const isAuthorized = actorRoleName === ORG_ADMIN_BASELINE_ROLE_NAME || 
+                           (actorRoleName === BRANCH_UNIT_BASELINE_ROLE_NAME && await unitService.isDescendantOf(uid, requester.unit_id, oid)) ||
                            (requester.unit_id === uid);
                            
       if (!isAuthorized) throw new AppError("Forbidden", 403);
@@ -575,11 +679,20 @@ async function getLeaderboard({ scope, orgId, deptId, unitId, limit = 50, offset
     if (!oid || !did) throw new AppError("Department scope requires org_id and dept_id", 400);
     const dep = await Department.findByPk(did);
     if (!dep || dep.org_id !== oid) throw new AppError("Invalid department", 400);
-    if (requester.user_type === "SUPERADMIN") {
+    const {
+      SUPER_ADMIN_BASELINE_ROLE_NAME,
+      ORG_ADMIN_BASELINE_ROLE_NAME,
+      BRANCH_UNIT_BASELINE_ROLE_NAME,
+      DEPT_ADMIN_BASELINE_ROLE_NAME,
+    } = require("../config/systemBaselineRoles");
+    const actorRoleName = requester.role?.name;
+    const isPlatformAdmin = requester.org_id === null && actorRoleName === SUPER_ADMIN_BASELINE_ROLE_NAME;
+
+    if (isPlatformAdmin || requester.isSuperAdmin) {
       /* ok */
-    } else if (requester.user_type === "ORG_ADMIN" || requester.user_type === "UNIT_ADMIN") {
+    } else if (actorRoleName === ORG_ADMIN_BASELINE_ROLE_NAME || actorRoleName === BRANCH_UNIT_BASELINE_ROLE_NAME) {
       if (requester.org_id !== oid) throw new AppError("Forbidden", 403);
-    } else if (requester.user_type === "DEPT_ADMIN" || requester.user_type === "STAFF") {
+    } else if (actorRoleName === DEPT_ADMIN_BASELINE_ROLE_NAME) {
       if (requester.org_id !== oid || requester.dept_id !== did) throw new AppError("Forbidden", 403);
     } else {
       throw new AppError("Forbidden", 403);
@@ -613,7 +726,11 @@ async function getLeaderboard({ scope, orgId, deptId, unitId, limit = 50, offset
       { model: Department, attributes: ["id", "name"], required: false },
       { model: Organization, attributes: ["id", "name"], required: false },
     ],
-    order: [["gamification_xp", "DESC"]],
+    order: [
+      ["gamification_xp", "DESC"],
+      ["gamification_reputation", "DESC"],
+      [sequelize.literal("passed_challenge_count"), "DESC"],
+    ],
     limit: Math.min(Number(limit) || 50, 200),
     offset: Number(offset) || 0,
   });
@@ -692,10 +809,18 @@ async function deleteChallenge(id, author = null) {
 }
 
 async function assertSnapshotAllowed(requester, enumScope, orgId, deptId) {
-  const ut = requester.user_type;
-  if (ut === "SUPERADMIN") return;
+  const {
+    SUPER_ADMIN_BASELINE_ROLE_NAME,
+    ORG_ADMIN_BASELINE_ROLE_NAME,
+    DEPT_ADMIN_BASELINE_ROLE_NAME,
+  } = require("../config/systemBaselineRoles");
+  const actorRoleName = requester.role?.name;
+  const isPlatformAdmin = requester.org_id === null && actorRoleName === SUPER_ADMIN_BASELINE_ROLE_NAME;
+
+  if (isPlatformAdmin || requester.isSuperAdmin) return;
   if (enumScope === "GLOBAL") throw new AppError("Forbidden", 403);
-  if (ut === "ORG_ADMIN") {
+
+  if (actorRoleName === ORG_ADMIN_BASELINE_ROLE_NAME) {
     if (!orgId || orgId !== requester.org_id) throw new AppError("Forbidden", 403);
     if (enumScope === "DEPT" && deptId) {
       const d = await Department.findByPk(deptId);
@@ -703,7 +828,7 @@ async function assertSnapshotAllowed(requester, enumScope, orgId, deptId) {
     }
     return;
   }
-  if (ut === "DEPT_ADMIN") {
+  if (actorRoleName === DEPT_ADMIN_BASELINE_ROLE_NAME) {
     if (enumScope !== "DEPT" || !deptId || deptId !== requester.dept_id || orgId !== requester.org_id) {
       throw new AppError("Forbidden", 403);
     }
@@ -759,10 +884,14 @@ function formatTrainingAssignment(row) {
     unitId: plain.unit_id,
     title: plain.title,
     dueDate: due,
+    campaignType: plain.campaign_type,
+    triggerType: plain.trigger_type,
+    relativeDays: plain.relative_days,
   };
 }
 
 function dueDateEndUtc(due) {
+  if (!due) return new Date();
   let s = due;
   if (due && typeof due !== "string") {
     s = due.toISOString ? due.toISOString().slice(0, 10) : String(due);
@@ -800,7 +929,7 @@ async function getAssignmentCompletionStats(plain) {
     const audienceWhere = { status: "ACTIVE" };
     if (plain.unit_id) audienceWhere.unit_id = plain.unit_id;
     else if (plain.dept_id) audienceWhere.dept_id = plain.dept_id;
-    else if (plain.org_id) audienceWhere.org_id = plain.org_id;
+    else audienceWhere.org_id = plain.org_id || null;
 
     const audienceTotal = await User.count({ where: audienceWhere });
     
@@ -817,6 +946,8 @@ async function getAssignmentCompletionStats(plain) {
     } else if (plain.org_id) {
       scopeWhereSql += " AND u.org_id = :orgId";
       replacements.orgId = plain.org_id;
+    } else {
+      scopeWhereSql += " AND u.org_id IS NULL";
     }
 
     const rows = await sequelize.query(
@@ -863,14 +994,16 @@ async function getAssignmentCompletionStats(plain) {
   };
 }
 
-async function listMyTrainingAssignments(viewer) {
+async function listMyTrainingAssignments(viewer, options = {}) {
+  const filterStatus = options.status || null;
   const uid = viewer.user_id;
   const orgId = viewer.org_id;
-  const ut = viewer.user_type;
-
+  const { SUPER_ADMIN_BASELINE_ROLE_NAME } = require("../config/systemBaselineRoles");
+  const actorRoleName = viewer.role?.name;
+  const isPlatformAdmin = viewer.org_id === null && actorRoleName === SUPER_ADMIN_BASELINE_ROLE_NAME;
   const or = [{ user_id: uid }];
 
-  if (ut === "SUPERADMIN") {
+  if (isPlatformAdmin || viewer.isSuperAdmin || viewer.org_id === null) {
     or.push({ assign_all: true, org_id: null });
     if (orgId) {
       or.push({ assign_all: true, org_id: orgId });
@@ -890,7 +1023,40 @@ async function listMyTrainingAssignments(viewer) {
     order: [["due_date", "ASC"]],
   });
 
-  return rows.map(formatTrainingAssignment);
+  const enriched = await Promise.all(
+    rows.map(async (row) => {
+      const base = formatTrainingAssignment(row);
+      const dueEnd = dueDateEndUtc(row.due_date);
+      
+      // Check for any completed attempt by this specific user for this challenge (best score first)
+      const attempt = await GamificationAttempt.findOne({
+        where: {
+          user_id: uid,
+          challenge_id: row.challenge_id,
+          completed_at: { [Op.ne]: null }
+        },
+        order: [["score", "DESC"], ["completed_at", "ASC"]]
+      });
+
+      let status = "PENDING";
+      if (attempt) {
+        status = attempt.completed_at <= dueEnd ? "COMPLETED" : "LATE";
+      }
+
+      return {
+        ...base,
+        status,
+        completedAt: attempt ? attempt.completed_at : null,
+        score: attempt ? attempt.score : null
+      };
+    })
+  );
+
+  if (filterStatus) {
+    return enriched.filter(e => e.status === filterStatus.toUpperCase());
+  }
+
+  return enriched;
 }
 
 async function createTrainingAssignment(actor, body) {
@@ -901,8 +1067,15 @@ async function createTrainingAssignment(actor, body) {
   const user_id = body.user_id || null;
   let org_id = body.org_id === "" ? null : body.org_id || null;
 
-  if (!challenge_id || !title || !due_date) {
-    throw new AppError("challenge_id, title, and due_date are required", 400);
+  const campaign_type = body.campaign_type || "one_time";
+  const trigger_type = body.trigger_type || null;
+  const relative_days = body.relative_days ? parseInt(body.relative_days, 10) : 7;
+
+  if (!challenge_id || !title) {
+    throw new AppError("challenge_id and title are required", 400);
+  }
+  if (campaign_type === "one_time" && !due_date) {
+    throw new AppError("due_date is required for one-time assignments", 400);
   }
   if (!assign_all && !user_id) {
     throw new AppError("Set assign_all true for org-wide, or provide user_id for one learner", 400);
@@ -914,7 +1087,16 @@ async function createTrainingAssignment(actor, body) {
   const ch = await LearningChallenge.findByPk(challenge_id);
   if (!ch || !ch.is_active) throw new AppError("Challenge not found", 404);
 
-  if (actor.user_type === "ORG_ADMIN") {
+  const {
+    SUPER_ADMIN_BASELINE_ROLE_NAME,
+    ORG_ADMIN_BASELINE_ROLE_NAME,
+    DEPT_ADMIN_BASELINE_ROLE_NAME,
+    BRANCH_UNIT_BASELINE_ROLE_NAME,
+  } = require("../config/systemBaselineRoles");
+  const actorRoleName = actor.role?.name;
+  const isPlatformAdmin = actor.org_id === null && actorRoleName === SUPER_ADMIN_BASELINE_ROLE_NAME;
+
+  if (actorRoleName === ORG_ADMIN_BASELINE_ROLE_NAME) {
     if (!actor.org_id) throw new AppError("Forbidden", 403);
     org_id = actor.org_id;
     // Scoped to body params if provided, otherwise whole org
@@ -925,15 +1107,15 @@ async function createTrainingAssignment(actor, body) {
         throw new AppError("User is not in your organization", 403);
       }
     }
-  } else if (actor.user_type === "DEPT_ADMIN") {
+  } else if (actorRoleName === DEPT_ADMIN_BASELINE_ROLE_NAME) {
     org_id = actor.org_id;
     body.dept_id = actor.dept_id;
     body.unit_id = null;
-  } else if (actor.user_type === "UNIT_ADMIN") {
+  } else if (actorRoleName === BRANCH_UNIT_BASELINE_ROLE_NAME) {
     org_id = actor.org_id;
     body.unit_id = actor.unit_id;
     body.dept_id = null;
-  } else if (actor.user_type === "SUPERADMIN") {
+  } else if (isPlatformAdmin || actor.isSuperAdmin) {
     // org_id from body or null
   } else {
     throw new AppError("Forbidden", 403);
@@ -942,7 +1124,7 @@ async function createTrainingAssignment(actor, body) {
   const dept_id = body.dept_id || null;
   const unit_id = body.unit_id || null;
 
-  if (assign_all && !org_id && actor.user_type !== "SUPERADMIN") {
+  if (assign_all && !org_id && !isPlatformAdmin && !actor.isSuperAdmin) {
     throw new AppError("org_id is required for organization-wide assignments", 400);
   }
 
@@ -961,7 +1143,10 @@ async function createTrainingAssignment(actor, body) {
     assign_all,
     challenge_id,
     title: String(title).slice(0, 255),
-    due_date,
+    due_date: campaign_type === "triggered" ? null : due_date,
+    campaign_type,
+    trigger_type,
+    relative_days,
   });
 
   return formatTrainingAssignment(row);
@@ -971,19 +1156,32 @@ async function listTrainingAssignmentsForAdmin(actor, query = {}) {
   const orgIdFilter = query.org_id === "" ? null : query.org_id || null;
   const where = {};
 
-  if (actor.user_type === "ORG_ADMIN") {
+  const {
+    SUPER_ADMIN_BASELINE_ROLE_NAME,
+    ORG_ADMIN_BASELINE_ROLE_NAME,
+    DEPT_ADMIN_BASELINE_ROLE_NAME,
+    BRANCH_UNIT_BASELINE_ROLE_NAME,
+  } = require("../config/systemBaselineRoles");
+  const actorRoleName = actor.role?.name;
+  const isPlatformAdmin = actor.org_id === null && actorRoleName === SUPER_ADMIN_BASELINE_ROLE_NAME;
+
+  if (actorRoleName === ORG_ADMIN_BASELINE_ROLE_NAME) {
     if (!actor.org_id) throw new AppError("Forbidden", 403);
     where.org_id = actor.org_id;
     if (query.dept_id) where.dept_id = query.dept_id;
     if (query.unit_id) where.unit_id = query.unit_id;
-  } else if (actor.user_type === "DEPT_ADMIN") {
+  } else if (actorRoleName === DEPT_ADMIN_BASELINE_ROLE_NAME) {
     where.org_id = actor.org_id;
     where.dept_id = actor.dept_id;
-  } else if (actor.user_type === "UNIT_ADMIN") {
+  } else if (actorRoleName === BRANCH_UNIT_BASELINE_ROLE_NAME) {
     where.org_id = actor.org_id;
     where.unit_id = actor.unit_id;
-  } else if (actor.user_type === "SUPERADMIN") {
-    if (orgIdFilter) where.org_id = orgIdFilter;
+  } else if (isPlatformAdmin || actor.isSuperAdmin) {
+    if (orgIdFilter === "platform" || !orgIdFilter) {
+      where.org_id = null;
+    } else {
+      where.org_id = orgIdFilter;
+    }
     if (query.dept_id) where.dept_id = query.dept_id;
     if (query.unit_id) where.unit_id = query.unit_id;
   } else {
@@ -1011,19 +1209,28 @@ async function deleteTrainingAssignment(actor, id) {
   const row = await LearnerTrainingAssignment.findByPk(id);
   if (!row) throw new AppError("Assignment not found", 404);
 
-  if (actor.user_type === "ORG_ADMIN") {
+  const {
+    SUPER_ADMIN_BASELINE_ROLE_NAME,
+    ORG_ADMIN_BASELINE_ROLE_NAME,
+    DEPT_ADMIN_BASELINE_ROLE_NAME,
+    BRANCH_UNIT_BASELINE_ROLE_NAME,
+  } = require("../config/systemBaselineRoles");
+  const actorRoleName = actor.role?.name;
+  const isPlatformAdmin = actor.org_id === null && actorRoleName === SUPER_ADMIN_BASELINE_ROLE_NAME;
+
+  if (actorRoleName === ORG_ADMIN_BASELINE_ROLE_NAME) {
     if (!actor.org_id || String(row.org_id) !== String(actor.org_id)) {
       throw new AppError("Forbidden", 403);
     }
-  } else if (actor.user_type === "DEPT_ADMIN") {
+  } else if (actorRoleName === DEPT_ADMIN_BASELINE_ROLE_NAME) {
     if (String(row.dept_id) !== String(actor.dept_id)) {
       throw new AppError("Forbidden", 403);
     }
-  } else if (actor.user_type === "UNIT_ADMIN") {
+  } else if (actorRoleName === BRANCH_UNIT_BASELINE_ROLE_NAME) {
     if (String(row.unit_id) !== String(actor.unit_id)) {
       throw new AppError("Forbidden", 403);
     }
-  } else if (actor.user_type !== "SUPERADMIN") {
+  } else if (!isPlatformAdmin && !actor.isSuperAdmin) {
     throw new AppError("Forbidden", 403);
   }
 
@@ -1040,20 +1247,28 @@ function firstQueryVal(raw) {
  * Resolves org/dept/unit for admin training analytics (aligned with GET /users roster scope).
  */
 function resolveAdminTrainingScope(viewer, query = {}) {
-  const ut = viewer.user_type;
+  const {
+    SUPER_ADMIN_BASELINE_ROLE_NAME,
+    ORG_ADMIN_BASELINE_ROLE_NAME,
+    DEPT_ADMIN_BASELINE_ROLE_NAME,
+    BRANCH_UNIT_BASELINE_ROLE_NAME,
+  } = require("../config/systemBaselineRoles");
+  const actorRoleName = viewer.role?.name;
+  const isPlatformAdmin = viewer.org_id === null && actorRoleName === SUPER_ADMIN_BASELINE_ROLE_NAME;
+
   let org_id = firstQueryVal(query.org_id);
   let dept_id = firstQueryVal(query.dept_id);
   let unit_id = firstQueryVal(query.unit_id);
 
-  if (ut === "ORG_ADMIN") {
+  if (actorRoleName === ORG_ADMIN_BASELINE_ROLE_NAME) {
     org_id = viewer.org_id;
     dept_id = null;
     unit_id = null;
-  } else if (ut === "DEPT_ADMIN") {
+  } else if (actorRoleName === DEPT_ADMIN_BASELINE_ROLE_NAME) {
     org_id = viewer.org_id;
     dept_id = viewer.dept_id;
     unit_id = null;
-  } else if (ut === "UNIT_ADMIN") {
+  } else if (actorRoleName === BRANCH_UNIT_BASELINE_ROLE_NAME) {
     org_id = viewer.org_id;
     unit_id = viewer.unit_id;
     dept_id = null;
@@ -1065,10 +1280,10 @@ function resolveAdminTrainingScope(viewer, query = {}) {
   if (unit_id && !org_id) {
     throw new AppError("org_id is required when unit_id is set", 400);
   }
-  if (ut === "UNIT_ADMIN" && !viewer.unit_id) {
+  if (actorRoleName === BRANCH_UNIT_BASELINE_ROLE_NAME && !viewer.unit_id) {
     throw new AppError("Unit administrators must have a unit assigned", 403);
   }
-  if (ut !== "SUPERADMIN" && !org_id) {
+  if (!isPlatformAdmin && !viewer.isSuperAdmin && !org_id) {
     throw new AppError("Organization context required", 403);
   }
 
@@ -1097,7 +1312,7 @@ function resolveAdminTrainingScope(viewer, query = {}) {
   if (unit_id) scopeLabel = "Unit scope";
   else if (dept_id) scopeLabel = "Department scope";
   else if (org_id) scopeLabel = "Organization scope";
-  if (ut === "SUPERADMIN" && !org_id) scopeLabel = "All tenants (superadmin)";
+  if ((isPlatformAdmin || viewer.isSuperAdmin) && !org_id) scopeLabel = "All tenants (superadmin)";
 
   return { org_id, dept_id, unit_id, userWhere, scopeSql, sqlRepl, scopeLabel };
 }
@@ -1111,6 +1326,40 @@ async function getAdminTrainingSummary(viewer, query = {}) {
   const userCount = await User.count({ where: userWhere });
   const activeUserCount = await User.count({
     where: { ...userWhere, status: "ACTIVE" },
+  });
+
+  const totalStatsSql = `
+    SELECT 
+      COUNT(*)::int AS total_attempts,
+      COUNT(CASE WHEN (ga.passed = true OR ga.score >= :passScore) THEN 1 END)::int AS total_pass,
+      AVG(ga.score)::float AS avg_score,
+      AVG(ga.time_spent_sec)::float AS avg_time_spent
+    FROM "GamificationAttempts" ga
+    INNER JOIN "Users" u ON u.user_id = ga.user_id
+    WHERE ga.completed_at IS NOT NULL
+      AND (${scopeSql})
+  `;
+
+  const [totalStats] = await sequelize.query(totalStatsSql, {
+    replacements: sqlRepl,
+    type: QueryTypes.SELECT,
+  });
+
+  const popSql = `
+    SELECT lc.id, lc.title, COUNT(*)::int AS attempt_count
+    FROM "GamificationAttempts" ga
+    INNER JOIN "Users" u ON u.user_id = ga.user_id
+    INNER JOIN "LearningChallenges" lc ON lc.id = ga.challenge_id
+    WHERE ga.completed_at IS NOT NULL
+      AND (${scopeSql})
+    GROUP BY lc.id, lc.title
+    ORDER BY attempt_count DESC
+    LIMIT 5
+  `;
+
+  const popularChallenges = await sequelize.query(popSql, {
+    replacements: sqlRepl,
+    type: QueryTypes.SELECT,
   });
 
   const catSql = `
@@ -1171,6 +1420,10 @@ async function getAdminTrainingSummary(viewer, query = {}) {
     passAttempts: Number(r.pass_attempts) || 0,
   }));
 
+  const totalAttempts = totalStats?.total_attempts || 0;
+  const totalPass = totalStats?.total_pass || 0;
+  const passRate = totalAttempts > 0 ? Math.round((totalPass / totalAttempts) * 100) : 0;
+
   return {
     scopeLabel,
     orgId: org_id,
@@ -1178,24 +1431,37 @@ async function getAdminTrainingSummary(viewer, query = {}) {
     unitId: unit_id,
     userCount,
     activeUserCount,
+    totalAttempts,
+    passRate,
+    avgScore: Math.round(totalStats?.avg_score || 0),
+    avgTimeSpent: Math.round(totalStats?.avg_time_spent || 0),
     categories,
     topChallengers,
+    popularChallenges,
   };
 }
 
 async function listLeaderboardSnapshots(requester, { limit = 20, scope, org_id, dept_id } = {}) {
+  const {
+    SUPER_ADMIN_BASELINE_ROLE_NAME,
+    ORG_ADMIN_BASELINE_ROLE_NAME,
+    DEPT_ADMIN_BASELINE_ROLE_NAME,
+  } = require("../config/systemBaselineRoles");
+  const actorRoleName = requester.role?.name;
+  const isPlatformAdmin = requester.org_id === null && actorRoleName === SUPER_ADMIN_BASELINE_ROLE_NAME;
+
   const where = {};
   if (scope) where.scope = scope;
-  if (requester.user_type === "ORG_ADMIN") {
+  if (actorRoleName === ORG_ADMIN_BASELINE_ROLE_NAME) {
     where.org_id = requester.org_id;
-  } else if (requester.user_type === "DEPT_ADMIN") {
+  } else if (actorRoleName === DEPT_ADMIN_BASELINE_ROLE_NAME) {
     where.scope = "DEPT";
     where.dept_id = requester.dept_id;
     where.org_id = requester.org_id;
-  } else if (requester.user_type !== "SUPERADMIN") {
+  } else if (!isPlatformAdmin && !requester.isSuperAdmin) {
     throw new AppError("Forbidden", 403);
   }
-  if (requester.user_type === "SUPERADMIN") {
+  if (isPlatformAdmin || requester.isSuperAdmin) {
     if (org_id) where.org_id = org_id;
     if (dept_id) where.dept_id = dept_id;
   }
@@ -1277,6 +1543,194 @@ async function rateChallenge(userId, challengeId, ratingData) {
   return record;
 }
 
+async function getAssignmentDetailedReport(actor, assignmentId) {
+  const row = await LearnerTrainingAssignment.findByPk(assignmentId);
+  if (!row) throw new AppError("Assignment not found", 404);
+
+  const {
+    ORG_ADMIN_BASELINE_ROLE_NAME,
+    DEPT_ADMIN_BASELINE_ROLE_NAME,
+    BRANCH_UNIT_BASELINE_ROLE_NAME,
+  } = require("../config/systemBaselineRoles");
+  const actorRoleName = actor.role?.name;
+
+  // Scoping check (ensure actor can see this assignment)
+  if (actorRoleName === ORG_ADMIN_BASELINE_ROLE_NAME && String(row.org_id) !== String(actor.org_id)) throw new AppError("Forbidden", 403);
+  if (actorRoleName === DEPT_ADMIN_BASELINE_ROLE_NAME && String(row.dept_id) !== String(actor.dept_id)) throw new AppError("Forbidden", 403);
+  if (actorRoleName === BRANCH_UNIT_BASELINE_ROLE_NAME && String(row.unit_id) !== String(actor.unit_id)) throw new AppError("Forbidden", 403);
+
+  const dueEnd = dueDateEndUtc(row.due_date);
+  const challengeId = row.challenge_id;
+
+  let targetUsers = [];
+  if (!row.assign_all && row.user_id) {
+    const u = await User.findByPk(row.user_id, { attributes: ["user_id", "first_name", "last_name", "phone_number"] });
+    if (u) targetUsers = [u];
+  } else {
+    const userWhere = { status: "ACTIVE" };
+    if (row.unit_id) userWhere.unit_id = row.unit_id;
+    else if (row.dept_id) userWhere.dept_id = row.dept_id;
+    else if (row.org_id) userWhere.org_id = row.org_id;
+
+    targetUsers = await User.findAll({
+      where: userWhere,
+      attributes: ["user_id", "first_name", "last_name", "phone_number"],
+      order: [["first_name", "ASC"]]
+    });
+  }
+
+  const userIds = targetUsers.map(u => u.user_id);
+  const attempts = await GamificationAttempt.findAll({
+    where: {
+      user_id: { [Op.in]: userIds },
+      challenge_id: challengeId,
+      [Op.or]: [{ passed: true }, { score: { [Op.gte]: PASS_SCORE_PERCENT } }]
+    },
+    attributes: ["user_id", "completed_at", "score"],
+    order: [["completed_at", "ASC"]]
+  });
+
+  // Map user_id to their best (first passing) attempt
+  const attemptMap = new Map();
+  attempts.forEach(a => {
+    if (!attemptMap.has(a.user_id)) attemptMap.set(a.user_id, a);
+  });
+
+  const report = targetUsers.map(u => {
+    const attempt = attemptMap.get(u.user_id);
+    let status = "PENDING";
+    if (attempt) {
+      status = attempt.completed_at <= dueEnd ? "COMPLETED" : "LATE";
+    }
+
+    return {
+      userId: u.user_id,
+      name: `${u.first_name || ""} ${u.last_name || ""}`.trim(),
+      phone: u.phone_number,
+      status,
+      completedAt: attempt ? attempt.completed_at : null,
+      score: attempt ? attempt.score : null
+    };
+  });
+
+  return {
+    assignmentId: row.id,
+    title: row.title,
+    challengeId: row.challenge_id,
+    dueDate: row.due_date,
+    report
+  };
+}
+
+async function getTopRatedChallenges(viewer, limit = 5) {
+  const { SUPER_ADMIN_BASELINE_ROLE_NAME } = require("../config/systemBaselineRoles");
+  const actorRoleName = viewer.role?.name;
+  const isPlatformAdmin = viewer.org_id === null && actorRoleName === SUPER_ADMIN_BASELINE_ROLE_NAME;
+
+  const where = {};
+  if (!isPlatformAdmin && !viewer.isSuperAdmin) {
+    where.org_id = viewer.org_id;
+  }
+
+  const aggregated = await GamificationRating.findAll({
+    attributes: [
+      "challenge_id",
+      [sequelize.fn("AVG", sequelize.col("rating")), "avgRating"],
+      [sequelize.fn("COUNT", sequelize.col("id")), "ratingCount"],
+    ],
+    include: [
+      {
+        model: LearningChallenge,
+        where,
+        attributes: ["id", "title", "category", "difficulty"],
+        required: true,
+      },
+    ],
+    group: ["challenge_id", "LearningChallenge.id"],
+    order: [[sequelize.literal("avgRating"), "DESC"]],
+    limit: Number(limit) || 5,
+  });
+
+  return aggregated.map((row) => {
+    const data = row.get({ plain: true });
+    return {
+      challengeId: data.challenge_id,
+      title: data.LearningChallenge.title,
+      category: data.LearningChallenge.category,
+      difficulty: data.LearningChallenge.difficulty,
+      avgRating: parseFloat(Number(data.avgRating || 0).toFixed(1)),
+      ratingCount: Number(data.ratingCount || 0),
+    };
+  });
+}
+async function triggerAssignmentsForUser(user, transaction = null) {
+  try {
+    const { LearnerTrainingAssignment } = require("../models");
+    const { Op } = require("sequelize");
+
+    // 1. Find all triggered 'new_hire' templates for this user's scope
+    const templates = await LearnerTrainingAssignment.findAll({
+      where: {
+        campaign_type: "triggered",
+        trigger_type: "new_hire",
+        [Op.or]: [
+          { org_id: null },
+          { org_id: user.org_id }
+        ],
+        [Op.or]: [
+          { dept_id: null },
+          { dept_id: user.dept_id }
+        ],
+        [Op.or]: [
+          { unit_id: null },
+          { unit_id: user.unit_id }
+        ]
+      },
+      transaction
+    });
+
+    if (!templates.length) return;
+
+    const today = new Date();
+
+    for (const t of templates) {
+      // 2. Check if this specific challenge is already assigned to this user
+      const existing = await LearnerTrainingAssignment.findOne({
+        where: {
+          user_id: user.user_id,
+          challenge_id: t.challenge_id
+        },
+        transaction
+      });
+
+      if (existing) continue;
+
+      // 3. Calculate due date
+      const days = t.relative_days || 7;
+      const dueDate = new Date();
+      dueDate.setDate(today.getDate() + days);
+      const dueDateStr = dueDate.toISOString().slice(0, 10);
+
+      // 4. Create standard individual assignment for the user
+      await LearnerTrainingAssignment.create({
+        org_id: user.org_id,
+        dept_id: user.dept_id,
+        unit_id: user.unit_id,
+        user_id: user.user_id,
+        assign_all: false,
+        challenge_id: t.challenge_id,
+        title: t.title,
+        due_date: dueDateStr,
+        campaign_type: "one_time"
+      }, { transaction });
+
+      console.log(`[Triggered Automation] Assigned challenge "${t.title}" to new user "${user.first_name} ${user.last_name}"`);
+    }
+  } catch (err) {
+    console.error("Error in triggerAssignmentsForUser:", err);
+  }
+}
+
 module.exports = {
   toFrontendChallenge,
   computeLevel,
@@ -1289,6 +1743,7 @@ module.exports = {
   getLeaderboard,
   normalizeLeaderboardScope,
   getAdminTrainingSummary,
+  getTopRatedChallenges,
   listCategories,
   createCategory,
   updateCategory,
@@ -1302,4 +1757,6 @@ module.exports = {
   createTrainingAssignment,
   listTrainingAssignmentsForAdmin,
   deleteTrainingAssignment,
+  getAssignmentDetailedReport,
+  triggerAssignmentsForUser,
 };

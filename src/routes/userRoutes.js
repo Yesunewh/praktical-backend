@@ -21,6 +21,7 @@ const {
   deactivateUserController,
   activateUserController,
   adminUpdateUserScopeController,
+  getRegistrationRejectionLogsController,
 } = require("../controllers/userControllers");
 
 const {
@@ -48,10 +49,16 @@ const {
 
 const router = express.Router();
 
+const assignmentExceptBootstrap = (req, res, next) => {
+  if (req.allowFirstAdminBootstrap) return next();
+  return assignmentMiddleware(req, res, next);
+};
+
 // ─── User CRUD ──────────────────────────────────────────────────────────────
 router.route("/register-applicant").post(validateUser, applicantRegistrationController);
 router.route("/").post(
   bootstrapOrProtect,
+  assignmentExceptBootstrap,
   authorizeAdminsExceptBootstrap,
   validateUser,
   userRegistrationController
@@ -63,7 +70,14 @@ router
 router
   .route("/updatePassword")
   .patch(protect, validatePassword, updateUserPasswordController);
-router.route("/").get(protect, getAllUsersController);
+router
+  .route("/")
+  .get(
+    protect,
+    assignmentMiddleware,
+    permissionMiddleware("MANAGE_USERS"),
+    getAllUsersController
+  );
 router
   .route("/forgot-password")
   .post(validateEmail, resetEmailPasswordController);
@@ -79,15 +93,25 @@ router
   .route("/resetPasswordById/:userId")
   .patch(
     protect,
-    authorize("SUPERADMIN", "ORG_ADMIN", "DEPT_ADMIN", "UNIT_ADMIN"),
+    assignmentMiddleware,
+    permissionMiddleware("MANAGE_USERS"),
     resetUserPasswordByIdController
   );
 router
   .route("/pendingStatus")
   .get(
     protect,
-    authorize("SUPERADMIN", "ORG_ADMIN", "DEPT_ADMIN", "UNIT_ADMIN"),
+    assignmentMiddleware,
+    permissionMiddleware("MANAGE_USERS"),
     getAllUsersWithPendingStatusController
+  );
+router
+  .route("/rejection-logs")
+  .get(
+    protect,
+    assignmentMiddleware,
+    permissionMiddleware("MANAGE_USERS"),
+    getRegistrationRejectionLogsController
   );
 router.patch("/language", protect, updateLanguagePreferenceController);
 router.get("/login-info", protect, getUserLoginInfoController);
@@ -95,20 +119,23 @@ router.get("/phone/:phoneNumber", getUserByPhoneController);
 router.patch(
   "/:userId/approve-applicant",
   protect,
-  authorize("SUPERADMIN", "ORG_ADMIN", "DEPT_ADMIN", "UNIT_ADMIN"),
+  assignmentMiddleware,
+  permissionMiddleware("MANAGE_USERS"),
   validateApproveApplicant,
   approveApplicantController
 );
 router.post(
   "/:userId/reject-applicant",
   protect,
-  authorize("SUPERADMIN", "ORG_ADMIN", "DEPT_ADMIN", "UNIT_ADMIN"),
+  assignmentMiddleware,
+  permissionMiddleware("MANAGE_USERS"),
   rejectApplicantController
 );
 router.patch(
   "/:userId/admin-scope",
   protect,
-  authorize("SUPERADMIN", "ORG_ADMIN", "DEPT_ADMIN", "UNIT_ADMIN"),
+  assignmentMiddleware,
+  permissionMiddleware("MANAGE_USERS"),
   validateAdminUserScope,
   adminUpdateUserScopeController
 );
@@ -120,13 +147,15 @@ router
 router.patch(
   "/:userId/deactivate",
   protect,
-  authorize("SUPERADMIN", "ORG_ADMIN", "DEPT_ADMIN", "UNIT_ADMIN"),
+  assignmentMiddleware,
+  permissionMiddleware("MANAGE_USERS"),
   deactivateUserController
 );
 router.patch(
   "/:userId/activate",
   protect,
-  authorize("SUPERADMIN", "ORG_ADMIN", "DEPT_ADMIN", "UNIT_ADMIN"),
+  assignmentMiddleware,
+  permissionMiddleware("MANAGE_USERS"),
   activateUserController
 );
 

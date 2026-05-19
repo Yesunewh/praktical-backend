@@ -14,11 +14,6 @@ const Organization = sequelize.define(
       allowNull: false,
       unique: true,
     },
-    slug: {
-      type: DataTypes.STRING(100),
-      allowNull: false,
-      unique: true,
-    },
     logo_url: {
       type: DataTypes.STRING(500),
       allowNull: true,

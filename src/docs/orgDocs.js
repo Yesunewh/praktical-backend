@@ -2,7 +2,7 @@
  * @swagger
  * tags:
  *   - name: Organizations
- *     description: Platform-level tenant management (Super Admin)
+ *     description: Platform-level tenant management (Platform Administrator)
  *
  * components:
  *   schemas:
@@ -13,8 +13,6 @@
  *           type: string
  *           format: uuid
  *         name:
- *           type: string
- *         slug:
  *           type: string
  *         logo_url:
  *           type: string
@@ -27,28 +25,26 @@
  *
  * /organizations:
  *   post:
- *     summary: Create a new organization (Super Admin only)
+ *     summary: Create a new organization (Platform Administrator only)
  *     tags: [Organizations]
  *     security:
  *       - bearerAuth: []
  *     requestBody:
  *       required: true
  *       content:
- *         application/json:
+ *         multipart/form-data:
  *           schema:
  *             type: object
  *             required:
  *               - name
- *               - slug
  *             properties:
  *               name:
  *                 type: string
  *                 example: Acme Corp
- *               slug:
+ *               logo:
  *                 type: string
- *                 example: acme-corp
- *               logo_url:
- *                 type: string
+ *                 format: binary
+ *                 description: Organization logo image file (PNG/JPG)
  *               subscription_plan:
  *                 type: string
  *                 enum: [BASIC, PREMIUM, ENTERPRISE]
@@ -59,7 +55,7 @@
  *         description: Slug already exists or validation error
  *
  *   get:
- *     summary: Get all organizations (Super Admin only)
+ *     summary: Get all organizations (Platform Administrator only)
  *     tags: [Organizations]
  *     security:
  *       - bearerAuth: []

@@ -1,36 +1,53 @@
 const Joi = require("joi");
 
+const { Organization } = require("../models");
+
 const orgSchema = Joi.object({
   name: Joi.string().max(255).required().messages({
     "string.empty": "Organization name is required.",
     "string.max": "Organization name must be less than or equal to 255 characters.",
   }),
-  slug: Joi.string().pattern(/^[a-z0-9-]+$/).required().messages({
-    "string.empty": "Organization slug is required.",
-    "string.pattern.base": "Slug must contain only lowercase letters, numbers, and hyphens.",
-  }),
   status: Joi.string().valid("ACTIVE", "SUSPENDED", "PENDING").optional(),
   subscription_plan: Joi.string().valid("BASIC", "PREMIUM", "ENTERPRISE").optional(),
-});
+  logo: Joi.any().optional(), // Allow the logo field from multipart
+}).unknown(true); // Allow unknown fields like multer artifacts
 
-const validateOrg = (req, res, next) => {
-  const { error } = orgSchema.validate(req.body);
+const validateOrg = async (req, res, next) => {
+  console.log("--- DEBUG: Organization Validation ---");
+  console.log("Body:", req.body);
+  console.log("File:", req.file ? "File Received" : "No File");
+
+  const { error } = orgSchema.validate(req.body, { abortEarly: false });
   if (error) {
-    const detail = error.details[0];
-    let message = detail.message;
-
-    if (req.t) {
-      // Translation logic similar to userValidators
-      const fieldKey = detail.context.label || detail.path[0];
-      const field = req.t(`fields.${fieldKey}`);
-      
-      if (detail.type === "any.required" || detail.type === "string.empty") {
-        message = req.t("errors.field_required").replace("{{field}}", field);
-      }
-    }
-
-    return res.status(400).json({ success: false, message });
+    console.log("Validation Failed. Body received:", req.body);
+    const messages = error.details.map((d) => d.message);
+    
+    return res.status(400).json({ 
+      success: false, 
+      message: messages[0],
+      details: messages
+    });
   }
+
+  // Pre-check for Uniqueness (Case-Insensitive & Trimmed)
+  let { name } = req.body;
+  if (name) {
+    name = name.trim();
+    const { Op } = require("sequelize");
+    const existing = await Organization.findOne({ 
+      where: { 
+        name: { [Op.iLike]: name } 
+      } 
+    });
+    
+    if (existing) {
+      return res.status(400).json({
+        success: false,
+        message: `The organization name "${name}" is already taken.`
+      });
+    }
+  }
+
   next();
 };
 

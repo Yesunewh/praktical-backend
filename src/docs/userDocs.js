@@ -22,9 +22,6 @@
  *         status:
  *           type: string
  *           enum: [UNASSIGNED, ACTIVE, DEACTIVATED]
- *         user_type:
- *           type: string
- *           enum: [SUPERADMIN, ORG_ADMIN, DEPT_ADMIN, UNIT_ADMIN, STAFF, EXTERNAL]
  *
  * /users/login:
  *   post:
@@ -91,7 +88,46 @@
  *       content:
  *         application/json:
  *           schema:
- *             $ref: '#/components/schemas/User'
+ *             type: object
+ *             required:
+ *               - first_name
+ *               - last_name
+ *               - phone_number
+ *               - password
+ *             properties:
+ *               first_name:
+ *                 type: string
+ *                 example: "John"
+ *               last_name:
+ *                 type: string
+ *                 example: "Doe"
+ *               phone_number:
+ *                 type: string
+ *                 example: "0911223344"
+ *               email:
+ *                 type: string
+ *                 example: "john.doe@example.com"
+ *               password:
+ *                 type: string
+ *                 example: "Password123!"
+ *               status:
+ *                 type: string
+ *                 enum: [ACTIVE, UNASSIGNED, DEACTIVATED]
+ *                 example: "ACTIVE"
+ *               org_id:
+ *                 type: string
+ *                 format: uuid
+ *                 description: "Required when assigning a tenant-level admin"
+ *               dept_id:
+ *                 type: string
+ *                 format: uuid
+ *               unit_id:
+ *                 type: string
+ *                 format: uuid
+ *               role_id:
+ *                 type: string
+ *                 format: uuid
+ *                 description: "The role ID to assign to the user"
  *     responses:
  *       201:
  *         description: User created successfully
@@ -206,6 +242,38 @@
  *       200:
  *         description: Password reset successful
  *
+ * /users/resetPassword/{phoneNumber}:
+ *   patch:
+ *     summary: Reset user password by phone number (Legacy/Scoped)
+ *     tags: [Users]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: phoneNumber
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Password reset successful
+ *
+ * /users/resetPasswordById/{userId}:
+ *   patch:
+ *     summary: Admin resets user password by ID
+ *     tags: [Users]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: userId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Password reset successful
+ *
  * /users/pendingStatus:
  *   get:
  *     summary: Get pending self-registrations
@@ -215,6 +283,54 @@
  *     responses:
  *       200:
  *         description: List of pending users
+ *
+ * /users/language:
+ *   patch:
+ *     summary: Update user language preference
+ *     tags: [Users]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - language_preference
+ *             properties:
+ *               language_preference:
+ *                 type: string
+ *                 example: "en"
+ *     responses:
+ *       200:
+ *         description: Language preference updated
+ *
+ * /users/login-info:
+ *   get:
+ *     summary: Get user login/session info
+ *     tags: [Users]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Login information retrieved
+ *
+ * /users/phone/{phoneNumber}:
+ *   get:
+ *     summary: Lookup user by phone number
+ *     tags: [Users]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: phoneNumber
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: User found
  *
  * /users/{userId}:
  *   get:
@@ -276,6 +392,22 @@
  *       200:
  *         description: Applicant approved
  *
+ * /users/{userId}/reject-applicant:
+ *   post:
+ *     summary: Reject a pending applicant
+ *     tags: [Users]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: userId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Applicant rejected
+ *
  * /users/{userId}/admin-scope:
  *   patch:
  *     summary: Update user administrative scope
@@ -299,9 +431,39 @@
  *                 type: string
  *               dept_id:
  *                 type: string
- *               user_type:
- *                 type: string
  *     responses:
  *       200:
  *         description: Scope updated
+ *
+ * /users/{userId}/deactivate:
+ *   patch:
+ *     summary: Deactivate user account
+ *     tags: [Users]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: userId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: User deactivated
+ *
+ * /users/{userId}/activate:
+ *   patch:
+ *     summary: Activate user account
+ *     tags: [Users]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: userId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: User activated
  */

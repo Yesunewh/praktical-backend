@@ -45,11 +45,6 @@ const User = sequelize.define(
       type: DataTypes.ENUM("UNASSIGNED", "ACTIVE", "DEACTIVATED"),
       defaultValue: "UNASSIGNED",
     },
-    user_type: {
-      type: DataTypes.ENUM("SUPERADMIN", "ORG_ADMIN", "UNIT_ADMIN", "DEPT_ADMIN", "STAFF", "EXTERNAL"), 
-      allowNull: false,
-      defaultValue: "STAFF",
-    },
     org_id: {
       type: DataTypes.UUID,
       allowNull: true,
@@ -120,6 +115,12 @@ const User = sequelize.define(
   {
     timestamps: true,
     tableName: "Users",
+    defaultScope: {
+      attributes: { exclude: ["password"] }
+    },
+    scopes: {
+      withPassword: { attributes: {} }
+    }
   }
 );
 

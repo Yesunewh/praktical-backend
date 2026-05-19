@@ -20,6 +20,7 @@ const LeaderboardSnapshot = require("./leaderboardSnapshotModel");
 const LearnerTrainingAssignment = require("./learnerTrainingAssignmentModel");
 const LearningChallengeCategory = require("./learningChallengeCategoryModel");
 const GamificationRating = require("./gamificationRatingModel");
+const RegistrationRejectionLog = require("./registrationRejectionLogModel");
 
 // User -> UserAssignment
 User.hasMany(UserAssignment, { foreignKey: "user_id" });
@@ -156,4 +157,5 @@ module.exports = {
   LearnerTrainingAssignment,
   LearningChallengeCategory,
   GamificationRating,
+  RegistrationRejectionLog,
 };

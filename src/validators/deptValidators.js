@@ -10,6 +10,7 @@ const deptSchema = Joi.object({
   }),
   description: Joi.string().allow("").optional(),
   status: Joi.string().valid("ACTIVE", "INACTIVE").optional(),
+  unit_id: Joi.string().guid({ version: "uuidv4" }).allow(null, "").optional(),
 });
 
 const validateDept = (req, res, next) => {

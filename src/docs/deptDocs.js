@@ -2,7 +2,7 @@
  * @swagger
  * tags:
  *   - name: Departments
- *     description: Group-level unit management (Org Admin)
+ *     description: Group-level unit management (Organization Admin)
  *
  * components:
  *   schemas:
@@ -44,7 +44,11 @@
  *               org_id:
  *                 type: string
  *                 format: uuid
- *                 description: Required for SuperAdmins to specify target org
+ *                 description: Required for platform administrators to specify target org
+ *               unit_id:
+ *                 type: string
+ *                 format: uuid
+ *                 description: Optional branch scoping (e.g. for Branch Admins)
  *               description:
  *                 type: string
  *     responses:

@@ -12,16 +12,16 @@ const swaggerDefinition = {
     description: "API documentation for the Practikal Multi-Tenant Training Platform",
   },
   servers: [
-    {
-      url: "https://practikalbackend.paperless.et/api",
-      description: "Production Server",
-    },
-    /*
+    // {
+    //   url: "https://practikalbackend.paperless.et/api",
+    //   description: "Production Server",
+    // },
+    
     {
       url: `http://localhost:${devPort}/api`,
       description: "Local Development Server",
     },
-    */
+    
   ],
   components: {
     securitySchemes: {

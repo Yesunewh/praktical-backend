@@ -17,6 +17,7 @@
         "user_not_found": "ተጠቃሚው አልተገኘም።",
         "invalid_credentials": "የተሳሳተ ስልክ ቁጥር ወይም የይለፍ ቃል::",
         "account_pending": "ይህ መለያ እስካሁን ንቁ አይደለም። ከመግባትዎ በፊት የመድረክ አስተዳዳሪ የምዝገባዎን ማጽደቅ እንዲጠብቁ።",
+        "registration_rejected": "የምዝገባ ጥያቄዎ በአስተዳዳሪ ውድቅ ተደርጓል።",
         "account_deactivated": "ይህ መለያ ተሰናክሏል። የድርጅትዎን አስተዳዳሪ ያግኙ።",
         "current_password_incorrect": "የአሁኑ የይለፍ ቃል ትክክል አይደለም።",
         "internal_error": "የውስጥ አገልጋይ ስህተት። እባክዎ ቆይተው እንደገና ይሞክሩ።",

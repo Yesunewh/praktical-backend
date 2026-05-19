@@ -17,6 +17,7 @@
         "user_not_found": "Fayyadamaan hin argamne.",
         "invalid_credentials": "Lakkoofsa bilbilaa ykn jecha icchitii dogoggora.",
         "account_pending": "Akkaawuntiin kun ammallee hin hojjetu. Dura seenuuf bulchaa waltajjii galmaa kee mirkaneessuu eegi.",
+        "registration_rejected": "Gaaffiin galmee kee bulchaan kuffifameera.",
         "account_deactivated": "Akkaawuntiin kun dhaabbateera. Bulchaa dhaabbata kee qunnami.",
         "current_password_incorrect": "Jecha icchitii ammee dogoggora.",
         "internal_error": "Dogoggora keessoo. Maaloo yeroo booda irra deebi'ii yaali.",

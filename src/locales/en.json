@@ -22,6 +22,7 @@
         "user_not_found": "User not found.",
         "invalid_credentials": "Invalid phone number or password.",
         "account_pending": "This account is not active yet. Wait for a platform administrator to approve your registration before you can sign in.",
+        "registration_rejected": "Your registration request was rejected by an administrator.",
         "account_deactivated": "This account has been deactivated. Contact your organization administrator.",
         "current_password_incorrect": "Current password is incorrect.",
         "internal_error": "Internal server error. Please try again later.",

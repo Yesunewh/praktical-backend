@@ -7,13 +7,27 @@ const unitService = require("./unitService");
  * Sequelize where fragment for challenges visible in list/play for this viewer.
  * Caller must merge with { is_active: true } and optional category/difficulty.
  */
+const {
+  ORG_ADMIN_BASELINE_ROLE_NAME,
+  BRANCH_UNIT_BASELINE_ROLE_NAME,
+  DEPT_ADMIN_BASELINE_ROLE_NAME,
+  SUPER_ADMIN_BASELINE_ROLE_NAME,
+} = require("../config/systemBaselineRoles");
+
+/**
+ * Sequelize where fragment for challenges visible in list/play for this viewer.
+ * Caller must merge with { is_active: true } and optional category/difficulty.
+ */
 async function buildChallengeVisibilityWhere(viewer, options = {}) {
-  const { user_type: ut, org_id: uOrg, dept_id: uDept, unit_id: uUnit } = viewer || {};
+  const { org_id: uOrg, dept_id: uDept, unit_id: uUnit } = viewer || {};
+  const actorRoleName = viewer?.role?.name;
+  const isSuperAdmin = uOrg === null && actorRoleName === SUPER_ADMIN_BASELINE_ROLE_NAME;
+
   const filterOrgId = options.filterOrgId || null;
   const filterDeptId = options.filterDeptId || null;
   const filterUnitId = options.filterUnitId || null;
 
-  if (ut === "SUPERADMIN") {
+  if (isSuperAdmin) {
     const where = {};
     if (filterOrgId) where.org_id = filterOrgId;
     if (filterDeptId) where.dept_id = filterDeptId;
@@ -21,7 +35,7 @@ async function buildChallengeVisibilityWhere(viewer, options = {}) {
     return where;
   }
 
-  if (ut === "ORG_ADMIN") {
+  if (actorRoleName === ORG_ADMIN_BASELINE_ROLE_NAME) {
     const where = {
       [Op.or]: [{ org_id: null, dept_id: null, unit_id: null }, { org_id: uOrg }],
     };
@@ -56,8 +70,10 @@ async function buildChallengeVisibilityWhere(viewer, options = {}) {
 
 function userCanAccessChallenge(user, challenge) {
   if (!user || !challenge || challenge.is_active === false) return false;
-  const ut = user.user_type;
-  if (ut === "SUPERADMIN") return true;
+  const actorRoleName = user?.role?.name;
+  const isSuperAdmin = user.org_id === null && actorRoleName === SUPER_ADMIN_BASELINE_ROLE_NAME;
+
+  if (isSuperAdmin) return true;
 
   const o = challenge.org_id;
   const d = challenge.dept_id;
@@ -65,17 +81,17 @@ function userCanAccessChallenge(user, challenge) {
 
   if (!o && !d && !u) return true; // Global
 
-  if (ut === "ORG_ADMIN") {
+  if (actorRoleName === ORG_ADMIN_BASELINE_ROLE_NAME) {
     return o === user.org_id;
   }
 
   if (user.org_id && o !== user.org_id) return false;
 
-  if (ut === "UNIT_ADMIN") {
+  if (actorRoleName === BRANCH_UNIT_BASELINE_ROLE_NAME) {
     return u === user.unit_id || (!u && !d); // Own unit or org-wide within their org
   }
 
-  if (ut === "DEPT_ADMIN") {
+  if (actorRoleName === DEPT_ADMIN_BASELINE_ROLE_NAME) {
     return d === user.dept_id || (!d && !u);
   }
 
@@ -94,7 +110,9 @@ async function assertDepartmentMatchesOrg(deptId, orgId) {
 }
 
 async function assertAuthorCanUpsertChallenge(author, payload, existingRow) {
-  const ut = author.user_type;
+  const actorRoleName = author?.role?.name;
+  const isSuperAdmin = author.org_id === null && actorRoleName === SUPER_ADMIN_BASELINE_ROLE_NAME;
+  
   const pOrg = payload.org_id != null ? payload.org_id : null;
   const pDept = payload.dept_id != null ? payload.dept_id : null;
   const pUnit = payload.unit_id != null ? payload.unit_id : null;
@@ -103,29 +121,29 @@ async function assertAuthorCanUpsertChallenge(author, payload, existingRow) {
 
   if (existingRow) {
     const isGlobal = !existingRow.org_id && !existingRow.dept_id && !existingRow.unit_id;
-    if (isGlobal && ut !== "SUPERADMIN") {
-      throw new AppError("Only SUPERADMIN can modify platform-wide challenges", 403);
+    if (isGlobal && !isSuperAdmin) {
+      throw new AppError("Only Super Admin can modify platform-wide challenges", 403);
     }
-    if (ut !== "SUPERADMIN") {
+    if (!isSuperAdmin) {
       if (existingRow.org_id !== author.org_id) throw new AppError("Forbidden", 403);
-      if (ut === "DEPT_ADMIN" && existingRow.dept_id && existingRow.dept_id !== author.dept_id) {
+      if (actorRoleName === DEPT_ADMIN_BASELINE_ROLE_NAME && existingRow.dept_id && existingRow.dept_id !== author.dept_id) {
         throw new AppError("Forbidden", 403);
       }
-      if (ut === "UNIT_ADMIN" && existingRow.unit_id && existingRow.unit_id !== author.unit_id) {
+      if (actorRoleName === BRANCH_UNIT_BASELINE_ROLE_NAME && existingRow.unit_id && existingRow.unit_id !== author.unit_id) {
         throw new AppError("Forbidden", 403);
       }
     }
   }
 
-  if (ut === "SUPERADMIN") return;
+  if (isSuperAdmin) return;
 
-  if (ut === "ORG_ADMIN") {
-    if (!pOrg && !pDept && !pUnit) throw new AppError("Only SUPERADMIN can create platform-wide challenges", 403);
+  if (actorRoleName === ORG_ADMIN_BASELINE_ROLE_NAME) {
+    if (!pOrg && !pDept && !pUnit) throw new AppError("Only Super Admin can create platform-wide challenges", 403);
     if (pOrg !== author.org_id) throw new AppError("Forbidden", 403);
     return;
   }
 
-  if (ut === "UNIT_ADMIN") {
+  if (actorRoleName === BRANCH_UNIT_BASELINE_ROLE_NAME) {
     if (pOrg !== author.org_id) throw new AppError("Forbidden", 403);
     const isDesc = await unitService.isDescendantOf(pUnit, author.unit_id, author.org_id);
     if (!isDesc) {
@@ -134,14 +152,14 @@ async function assertAuthorCanUpsertChallenge(author, payload, existingRow) {
     return;
   }
 
-  if (ut === "DEPT_ADMIN") {
+  if (actorRoleName === DEPT_ADMIN_BASELINE_ROLE_NAME) {
     if (pOrg !== author.org_id || pDept !== author.dept_id) {
       throw new AppError("Department admins may only publish to their own department", 403);
     }
     return;
   }
 
-  throw new AppError("Forbidden", 403);
+  throw new AppError("Forbidden: You do not have the required administrative role.", 403);
 }
 
 async function assertAuthorCanMutateExistingChallenge(author, row) {

@@ -36,6 +36,33 @@
  *       200:
  *         description: List of Unit Types
  * 
+ * /units/types/{id}:
+ *   put:
+ *     summary: Update a Unit Type
+ *     tags: [Units]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               name:
+ *                 type: string
+ *               level:
+ *                 type: integer
+ *     responses:
+ *       200:
+ *         description: Unit Type updated
+ * 
  * /units:
  *   post:
  *     summary: Create an Organizational Unit (Branch)
@@ -99,7 +126,7 @@
  *     responses:
  *       200:
  *         description: Unit details
- *   patch:
+ *   put:
  *     summary: Update unit details
  *     tags: [Units]
  *     security:

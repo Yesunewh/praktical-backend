@@ -1,8 +1,8 @@
 const { Permission, PermissionAllocation, OrganizationalUnit } = require("../models");
 const { Op } = require("sequelize");
-const { hiddenPermissionNamesForUserType, SUPERADMIN_ONLY } = require("../config/permissionTiers");
+const { hiddenPermissionNamesForRole, SUPERADMIN_ONLY } = require("../config/permissionTiers");
 const { LEGACY_PERMISSION_NAMES } = require("../config/legacyPermissionsRemove");
-const { applyMatrixLockedForEditorMetadata } = require("../config/permissionMatrixBaselines");
+const { applyMatrixLockedForEditorMetadata, SUPER_ADMIN_BASELINE_ROLE_NAME, ORG_ADMIN_BASELINE_ROLE_NAME } = require("../config/permissionMatrixBaselines");
 
 const legacyPermissionNameSet = new Set(LEGACY_PERMISSION_NAMES);
 
@@ -12,18 +12,21 @@ class PermissionService {
     return await Permission.create(data);
   }
 
-  async allocatePermission(permissionId, type, targetId = null, effect = "GRANT", user = { user_type: "SUPERADMIN" }) {
-    if (user.user_type === "ORG_ADMIN") {
+  async allocatePermission(permissionId, type, targetId = null, effect = "GRANT", actor = {}) {
+    const actorRoleName = actor.role?.name;
+    const isPlatformAdmin = actor.org_id === null && actorRoleName === SUPER_ADMIN_BASELINE_ROLE_NAME;
+
+    if (actorRoleName === ORG_ADMIN_BASELINE_ROLE_NAME) {
       throw new Error(
         "Organization administrators have read-only access to the permission matrix; allocations cannot be changed."
       );
     }
-    if (user.user_type !== "SUPERADMIN") {
+    if (!isPlatformAdmin) {
       if (effect !== "DENY" || type !== "UNIT") {
         throw new Error("Admins can ONLY restrict (DENY) capabilities to specific branches.");
       }
       const targetUnit = await OrganizationalUnit.findByPk(targetId);
-      if (!targetUnit || targetUnit.org_id !== user.org_id) {
+      if (!targetUnit || targetUnit.org_id !== actor.org_id) {
         throw new Error("Target branch is invalid or out of your organizational scope.");
       }
     }
@@ -53,18 +56,21 @@ class PermissionService {
     });
   }
 
-  async bulkAllocateToOrg(orgId, effect = "GRANT") {
+  async bulkAllocateToOrg(orgId, effect = "GRANT", options = {}) {
+    const { transaction } = options;
+
     // 1. Clear existing allocations for this Org
     await PermissionAllocation.destroy({
       where: {
         allocation_type: "ORGANIZATION",
         allocation_id: orgId
-      }
+      },
+      transaction
     });
 
     // 2. If GRANT, create new records for all permissions
     if (effect === "GRANT") {
-      const allPermissions = await Permission.findAll();
+      const allPermissions = await Permission.findAll({ transaction });
       const allocations = allPermissions.map(p => ({
         permission_id: p.id,
         allocation_type: "ORGANIZATION",
@@ -72,7 +78,7 @@ class PermissionService {
         effect: "GRANT"
       }));
 
-      return await PermissionAllocation.bulkCreate(allocations);
+      return await PermissionAllocation.bulkCreate(allocations, { transaction });
     }
 
     return { cleared: true };
@@ -121,16 +127,16 @@ class PermissionService {
   /**
    * @param {string|null|undefined} orgId
    * @param {string|null|undefined} unitId
-   * @param {string|null|undefined} requesterUserType - masks platform / org-only permissions per tier
+   * @param {string|null|undefined} requesterRoleName - masks platform / org-only permissions per tier
    */
-  async getAvailablePermissions(orgId, unitId, requesterUserType = null) {
+  async getAvailablePermissions(orgId, unitId, requesterRoleName = null) {
     if (orgId) {
       await this.ensureOrgPermissionPool(orgId);
     }
 
     let allPermissions = await Permission.findAll({ raw: true });
     allPermissions = allPermissions.filter((p) => p.name && !legacyPermissionNameSet.has(p.name));
-    const hiddenNames = hiddenPermissionNamesForUserType(requesterUserType);
+    const hiddenNames = hiddenPermissionNamesForRole(requesterRoleName);
 
     // Collect conditions to see what they are allowed
     const orConditions = [{ allocation_type: "SYSTEM" }];
@@ -180,7 +186,7 @@ class PermissionService {
     const filtered = orgId
       ? rows.filter((p) => p.name && !SUPERADMIN_ONLY.has(p.name))
       : rows;
-    return applyMatrixLockedForEditorMetadata(filtered, requesterUserType);
+    return applyMatrixLockedForEditorMetadata(filtered, requesterRoleName);
   }
 }
 

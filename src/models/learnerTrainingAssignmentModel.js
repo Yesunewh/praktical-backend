@@ -47,7 +47,21 @@ const LearnerTrainingAssignment = sequelize.define(
     },
     due_date: {
       type: DataTypes.DATEONLY,
+      allowNull: true,
+    },
+    campaign_type: {
+      type: DataTypes.STRING(32),
       allowNull: false,
+      defaultValue: "one_time",
+    },
+    trigger_type: {
+      type: DataTypes.STRING(64),
+      allowNull: true,
+    },
+    relative_days: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      defaultValue: 7,
     },
   },
   {

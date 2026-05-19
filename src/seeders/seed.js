@@ -1,18 +1,32 @@
 const path = require("path");
 require("dotenv").config({ path: path.join(__dirname, "..", "config", ".env") });
-const { User } = require("../models");
+const { User, Role, UserAssignment } = require("../models");
 const { hashPassword } = require("../utils/hashUtils");
 const sequelize = require("../config/database");
+const syncPermissions = require("../utils/permissionSync");
+const { SUPER_ADMIN_BASELINE_ROLE_NAME } = require("../config/systemBaselineRoles");
 
 const seedSuperAdmin = async () => {
   const phone = "0911000000";
   const password = "SuperAdmin123!";
 
   try {
-    // Sync models (optional, but ensures table exists)
-    // await sequelize.sync(); 
+    console.log("💾 Starting Super Admin Seeder...");
+    
+    // Ensure permissions and baseline roles exist
+    await syncPermissions();
 
-    const existingAdmin = await User.findOne({ where: { user_type: "SUPERADMIN" } });
+    const role = await Role.findOne({ where: { name: SUPER_ADMIN_BASELINE_ROLE_NAME, org_id: null } });
+    if (!role) {
+      throw new Error(`Critical: ${SUPER_ADMIN_BASELINE_ROLE_NAME} role not found after sync.`);
+    }
+
+    // Check for existing super admin via assignment or phone
+    const existingAdmin = await User.findOne({ 
+      where: { phone_number: phone },
+      include: [{ model: UserAssignment, include: [{ model: Role, where: { name: SUPER_ADMIN_BASELINE_ROLE_NAME } }] }]
+    });
+
     if (existingAdmin) {
       console.log("✅ Super Admin already exists in the system.");
       return;
@@ -20,14 +34,19 @@ const seedSuperAdmin = async () => {
 
     const hashedPassword = await hashPassword(password);
     
-    await User.create({
+    const user = await User.create({
       first_name: "Super",
       last_name: "Admin",
       phone_number: phone,
       password: hashedPassword,
-      user_type: "SUPERADMIN",
       status: "ACTIVE",
       language_preference: "eng"
+    });
+
+    await UserAssignment.create({
+      user_id: user.user_id,
+      role_id: role.id,
+      unit_id: null
     });
 
     console.log("🚀 Super Admin Account Created SUCCESSFULLY!");

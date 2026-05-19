@@ -3,14 +3,28 @@ const sequelize = require("../config/database");
 const { Role, RolePermission, Permission } = require("../models");
 const permissionService = require("./permissionService");
 const {
-  hiddenPermissionNamesForUserType,
+  hiddenPermissionNamesForRole,
   roleContainsHiddenPermission,
 } = require("../config/permissionTiers");
-const { BASELINE_ROLE_DISPLAY_ORDER } = require("../config/systemBaselineRoles");
 const {
-  PLAY_PREVIEW_LOCKED_FOR_ADMIN_TIERS,
+  BASELINE_ROLE_DISPLAY_ORDER,
+  ORG_ADMIN_BASELINE_ROLE_DESCRIPTION,
+  BRANCH_UNIT_BASELINE_ROLE_DESCRIPTION,
+  DEPT_ADMIN_BASELINE_ROLE_DESCRIPTION,
+  SUPER_ADMIN_BASELINE_ROLE_NAME,
+  ORG_ADMIN_BASELINE_ROLE_NAME,
+  BRANCH_UNIT_BASELINE_ROLE_NAME,
+  DEPT_ADMIN_BASELINE_ROLE_NAME,
+} = require("../config/systemBaselineRoles");
+const {
+  BASELINE_NAME_TO_PERMISSIONS,
+  LEARNER_BASELINE_ROLE_NAME,
   shouldMatrixLockLearnerPreviewForEditor,
+  PLAY_PREVIEW_LOCKED_FOR_ADMIN_TIERS,
 } = require("../config/permissionMatrixBaselines");
+const {
+  DEFAULT_LEARNER_ROLE_DESCRIPTION,
+} = require("../config/defaultLearnerPermissions");
 
 function sortRolesForDisplay(roles) {
   const rank = (name) => {
@@ -24,11 +38,11 @@ function sortRolesForDisplay(roles) {
   });
 }
 
-async function assertPermissionsAllowedForUserType(permissionIds, requesterUserType) {
-  if (!permissionIds?.length || !requesterUserType || requesterUserType === "SUPERADMIN") {
+async function assertPermissionsAllowedForRole(permissionIds, requesterRoleName) {
+  if (!permissionIds?.length || !requesterRoleName || requesterRoleName === SUPER_ADMIN_BASELINE_ROLE_NAME) {
     return;
   }
-  const hidden = hiddenPermissionNamesForUserType(requesterUserType);
+  const hidden = hiddenPermissionNamesForRole(requesterRoleName);
   if (hidden.size === 0) return;
   const rows = await Permission.findAll({
     where: { id: permissionIds },
@@ -50,13 +64,13 @@ async function mergeTenantRolePermissionIdsWithLockedPreview(
   permissionIds,
   orgId,
   unitId,
-  requesterUserType,
+  requesterRoleName,
   isSuperadmin
 ) {
-  if (isSuperadmin || !orgId || !shouldMatrixLockLearnerPreviewForEditor(requesterUserType)) {
+  if (isSuperadmin || !orgId || !shouldMatrixLockLearnerPreviewForEditor(requesterRoleName)) {
     return permissionIds || [];
   }
-  const rows = await permissionService.getAvailablePermissions(orgId, unitId, requesterUserType);
+  const rows = await permissionService.getAvailablePermissions(orgId, unitId, requesterRoleName);
   const byName = new Map();
   for (const row of rows) {
     if (row.has_access && row.name) {
@@ -77,7 +91,7 @@ class RoleService {
    * System roles (org_id null): superadmin only; name cannot be changed.
    */
   async updateCustomRole(roleId, { name, description, permissionIds }, actorOrgId, unitId, options = {}) {
-    const { isSuperadmin = false, requesterUserType = null } = options;
+    const { isSuperadmin = false, requesterRoleName = null } = options;
     const role = await Role.findByPk(roleId);
     if (!role) {
       throw new Error("Role not found.");
@@ -141,7 +155,6 @@ class RoleService {
     }
 
     const effectiveOrgId = role.org_id;
-    const tierUser = isSuperadmin ? "SUPERADMIN" : requesterUserType;
 
     /** @type {string[] | undefined} */
     let mergedForSave = permissionIds;
@@ -150,18 +163,18 @@ class RoleService {
         permissionIds,
         effectiveOrgId,
         unitId,
-        requesterUserType,
+        requesterRoleName,
         isSuperadmin
       );
     }
 
-    const allowed = await permissionService.getAvailablePermissions(effectiveOrgId, unitId, tierUser);
+    const allowed = await permissionService.getAvailablePermissions(effectiveOrgId, unitId, requesterRoleName);
     const allowedMap = new Map(allowed.map((p) => [String(p.id), p.has_access]));
 
     if (mergedForSave !== undefined) {
       if (mergedForSave.length > 0) {
         if (!isSuperadmin) {
-          await assertPermissionsAllowedForUserType(mergedForSave, requesterUserType);
+          await assertPermissionsAllowedForRole(mergedForSave, requesterRoleName);
         }
         for (const pid of mergedForSave) {
           if (!allowedMap.get(String(pid))) {
@@ -205,7 +218,7 @@ class RoleService {
   }
 
   async createCustomRole(orgId, unitId, name, description, permissionIds, options = {}) {
-    const { isSuperadmin = false, requesterUserType = null } = options;
+    const { isSuperadmin = false, requesterRoleName = null } = options;
     if (!orgId && !isSuperadmin) {
       throw new Error("Organization ID is required to create a custom role.");
     }
@@ -216,16 +229,15 @@ class RoleService {
         mergedCreateIds,
         orgId,
         unitId,
-        requesterUserType,
+        requesterRoleName,
         isSuperadmin
       );
-      const tierUser = isSuperadmin ? "SUPERADMIN" : requesterUserType;
-      const allowed = await permissionService.getAvailablePermissions(orgId, unitId, tierUser);
+      const allowed = await permissionService.getAvailablePermissions(orgId, unitId, requesterRoleName);
       const allowedMap = new Map(allowed.map((p) => [String(p.id), p.has_access]));
 
       if (mergedCreateIds.length > 0) {
         if (!isSuperadmin) {
-          await assertPermissionsAllowedForUserType(mergedCreateIds, requesterUserType);
+          await assertPermissionsAllowedForRole(mergedCreateIds, requesterRoleName);
         }
         for (const pid of mergedCreateIds) {
           if (!allowedMap.get(String(pid))) {
@@ -258,23 +270,95 @@ class RoleService {
     return role;
   }
 
-  async getRoles(orgId, includeSystem = true, requesterUserType = null) {
+  async getRoles(orgId, includeSystem = true, requesterRoleName = null) {
     let roles;
+    const permissionInclude = {
+      model: Permission,
+      attributes: ["id", "name", "description"],
+      through: { attributes: [] } // Omits the verbose RolePermission pivot table from the output
+    };
+
     if (!orgId) {
-      const where = includeSystem ? {} : { org_id: { [Op.is]: null } };
-      roles = await Role.findAll({ where, include: [{ model: Permission }] });
+      // If no orgId is provided, only return global/system roles.
+      const where = { org_id: { [Op.is]: null } };
+      roles = await Role.findAll({ where, include: [permissionInclude] });
     } else {
       const whereClause = includeSystem
         ? { [Op.or]: [{ org_id: orgId }, { org_id: { [Op.is]: null } }] }
         : { org_id: orgId };
-      roles = await Role.findAll({ where: whereClause, include: [{ model: Permission }] });
+      roles = await Role.findAll({ where: whereClause, include: [permissionInclude] });
     }
 
-    const hidden = hiddenPermissionNamesForUserType(requesterUserType);
+    const hidden = hiddenPermissionNamesForRole(requesterRoleName);
     if (hidden.size === 0) {
       return sortRolesForDisplay(roles);
     }
-    return sortRolesForDisplay(roles.filter((r) => !roleContainsHiddenPermission(r, hidden)));
+    return sortRolesForDisplay(
+      roles.filter((r) => {
+        // Never filter out the Department Admin, Branch Admin, or Learner baseline roles for hierarchical assignment
+        if (
+          r.name === DEPT_ADMIN_BASELINE_ROLE_NAME ||
+          r.name === BRANCH_UNIT_BASELINE_ROLE_NAME ||
+          r.name === "Learner" ||
+          r.name === LEARNER_BASELINE_ROLE_NAME
+        ) {
+          return true;
+        }
+        return !roleContainsHiddenPermission(r, hidden);
+      })
+    );
+  }
+
+  async seedOrganizationRoles(orgId, externalTransaction = null) {
+    if (!orgId) throw new Error("orgId is required for seeding.");
+
+    const transaction = externalTransaction || await sequelize.transaction();
+    try {
+      // Descriptions mapping
+      const descriptions = {
+        "Organization Admin": ORG_ADMIN_BASELINE_ROLE_DESCRIPTION,
+        "Branch Admin": BRANCH_UNIT_BASELINE_ROLE_DESCRIPTION,
+        "Department Admin": DEPT_ADMIN_BASELINE_ROLE_DESCRIPTION,
+        [LEARNER_BASELINE_ROLE_NAME]: DEFAULT_LEARNER_ROLE_DESCRIPTION,
+      };
+
+      for (const [roleName, permissionNames] of Object.entries(BASELINE_NAME_TO_PERMISSIONS)) {
+        // Skip Super Admin for organizations
+        if (roleName === "Super Admin") continue;
+
+        // 1. Create the Role for the Organization
+        const role = await Role.create({
+          name: roleName,
+          description: descriptions[roleName] || `Standard ${roleName} role.`,
+          org_id: orgId
+        }, { transaction });
+
+        // 2. Find the Permission IDs
+        const perms = await Permission.findAll({
+          where: { name: { [Op.in]: permissionNames } },
+          attributes: ["id"],
+          transaction
+        });
+
+        // 3. Link them
+        if (perms.length > 0) {
+          await RolePermission.bulkCreate(
+            perms.map(p => ({
+              role_id: role.id,
+              permission_id: p.id
+            })),
+            { transaction }
+          );
+        }
+      }
+
+      if (!externalTransaction) await transaction.commit();
+      console.log(`--- Seeded 4 baseline roles for Org ${orgId} ---`);
+    } catch (error) {
+      if (!externalTransaction) await transaction.rollback();
+      console.error("Error seeding organization roles:", error);
+      throw error;
+    }
   }
 }
 

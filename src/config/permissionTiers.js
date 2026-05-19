@@ -40,21 +40,28 @@ const STAFF_EXTERNAL_ASSIGNER_HIDDEN = new Set(
   ALL_MATRIX_PERMISSION_NAMES.filter((n) => !learnerNameSet.has(n))
 );
 
+const {
+  ORG_ADMIN_BASELINE_ROLE_NAME,
+  BRANCH_UNIT_BASELINE_ROLE_NAME,
+  DEPT_ADMIN_BASELINE_ROLE_NAME,
+  SUPER_ADMIN_BASELINE_ROLE_NAME,
+} = require("./systemBaselineRoles");
+
 /**
- * @param {string | undefined | null} userType
+ * @param {string | undefined | null} roleName
  * @returns {Set<string>}
  */
-function hiddenPermissionNamesForUserType(userType) {
-  if (!userType || userType === "SUPERADMIN") {
+function hiddenPermissionNamesForRole(roleName) {
+  if (!roleName || roleName === SUPER_ADMIN_BASELINE_ROLE_NAME) {
     return new Set();
   }
-  if (userType === "ORG_ADMIN") {
+  if (roleName === ORG_ADMIN_BASELINE_ROLE_NAME) {
     return new Set(SUPERADMIN_ONLY);
   }
-  if (userType === "UNIT_ADMIN") {
+  if (roleName === BRANCH_UNIT_BASELINE_ROLE_NAME) {
     return new Set(UNIT_ADMIN_HIDDEN);
   }
-  if (userType === "DEPT_ADMIN") {
+  if (roleName === DEPT_ADMIN_BASELINE_ROLE_NAME) {
     return new Set(DEPT_ADMIN_HIDDEN);
   }
   return new Set(STAFF_EXTERNAL_ASSIGNER_HIDDEN);
@@ -78,6 +85,6 @@ module.exports = {
   UNIT_ADMIN_HIDDEN,
   DEPT_ADMIN_HIDDEN,
   STAFF_EXTERNAL_ASSIGNER_HIDDEN,
-  hiddenPermissionNamesForUserType,
+  hiddenPermissionNamesForRole,
   roleContainsHiddenPermission,
 };

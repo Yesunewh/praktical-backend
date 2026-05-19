@@ -17,62 +17,75 @@ const {
   listTrainingAssignmentsAdmin,
   removeTrainingAssignment,
   adminTrainingSummary,
+  getAssignmentReport,
   listCategories,
   createCategory,
   updateCategory,
   removeCategory,
   rateChallenge,
+  topRatedChallenges,
 } = require("../controllers/gamificationController");
-const { protect, authorize } = require("../middlewares/authMiddleware");
+const { protect, assignmentMiddleware, permissionMiddleware } = require("../middlewares/authMiddleware");
 const { upload } = require("../middlewares/uploadMiddleware");
 
 router.use(protect);
+router.use(assignmentMiddleware);
 
 router.get("/categories", listCategories);
-router.post("/categories", authorize("SUPERADMIN"), upload.single("image"), createCategory);
-router.put("/categories/:id", authorize("SUPERADMIN"), upload.single("image"), updateCategory);
-router.delete("/categories/:id", authorize("SUPERADMIN"), removeCategory);
+router.post("/categories", permissionMiddleware("MANAGE_CHALLENGES"), upload.single("image"), createCategory);
+router.put("/categories/:id", permissionMiddleware("MANAGE_CHALLENGES"), upload.single("image"), updateCategory);
+router.delete("/categories/:id", permissionMiddleware("MANAGE_CHALLENGES"), removeCategory);
 router.get("/challenges", listChallenges);
 router.get("/challenges/:id", getChallenge);
 router.post("/challenges/:id/rate", rateChallenge);
 router.post("/challenges/:id/complete", completeChallenge);
 router.get(
   "/training-summary",
-  authorize("SUPERADMIN", "ORG_ADMIN", "DEPT_ADMIN", "UNIT_ADMIN"),
+  permissionMiddleware("VIEW_REPORTS"),
   adminTrainingSummary
 );
 router.get("/progress/me", progressMe);
 router.get("/assignments/me", myTrainingAssignments);
 router.get(
   "/assignments",
-  authorize("SUPERADMIN", "ORG_ADMIN", "DEPT_ADMIN", "UNIT_ADMIN"),
+  permissionMiddleware("VIEW_REPORTS"),
   listTrainingAssignmentsAdmin
+);
+router.get(
+  "/assignments/:id/report",
+  permissionMiddleware("VIEW_REPORTS"),
+  getAssignmentReport
+);
+router.get(
+  "/analytics/top-rated",
+  permissionMiddleware("VIEW_REPORTS"),
+  topRatedChallenges
 );
 router.post(
   "/assignments",
-  authorize("SUPERADMIN", "ORG_ADMIN", "UNIT_ADMIN"),
+  permissionMiddleware("MANAGE_CAMPAIGNS"),
   createTrainingAssignment
 );
 router.delete(
   "/assignments/:id",
-  authorize("SUPERADMIN", "ORG_ADMIN", "UNIT_ADMIN"),
+  permissionMiddleware("MANAGE_CAMPAIGNS"),
   removeTrainingAssignment
 );
 router.get("/achievements/me", achievementsMe);
 router.get("/leaderboard", leaderboard);
 router.post(
   "/leaderboard/snapshot",
-  authorize("SUPERADMIN", "ORG_ADMIN", "DEPT_ADMIN", "UNIT_ADMIN"),
+  permissionMiddleware("VIEW_REPORTS"),
   createLeaderboardSnapshot
 );
 router.get(
   "/leaderboard/snapshots",
-  authorize("SUPERADMIN", "ORG_ADMIN", "DEPT_ADMIN", "UNIT_ADMIN"),
+  permissionMiddleware("VIEW_REPORTS"),
   listLeaderboardSnapshots
 );
 
-router.post("/challenges", authorize("SUPERADMIN", "ORG_ADMIN", "DEPT_ADMIN", "UNIT_ADMIN"), createChallenge);
-router.put("/challenges/:id", authorize("SUPERADMIN", "ORG_ADMIN", "DEPT_ADMIN", "UNIT_ADMIN"), updateChallenge);
-router.delete("/challenges/:id", authorize("SUPERADMIN", "ORG_ADMIN", "DEPT_ADMIN", "UNIT_ADMIN"), removeChallenge);
+router.post("/challenges", permissionMiddleware("MANAGE_CHALLENGES"), createChallenge);
+router.put("/challenges/:id", permissionMiddleware("MANAGE_CHALLENGES"), updateChallenge);
+router.delete("/challenges/:id", permissionMiddleware("MANAGE_CHALLENGES"), removeChallenge);
 
 module.exports = router;

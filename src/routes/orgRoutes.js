@@ -5,7 +5,9 @@ const {
   getOrgByIdController 
 } = require("../controllers/orgControllers");
 const { validateOrg } = require("../validators/orgValidators");
-const { protect, permissionMiddleware } = require("../middlewares/authMiddleware");
+const { protect, assignmentMiddleware, permissionMiddleware } = require("../middlewares/authMiddleware");
+
+const { upload } = require("../middlewares/uploadMiddleware");
 
 const router = express.Router();
 
@@ -13,10 +15,10 @@ const router = express.Router();
  * Super Admin only routes for managing Organizations
  */
 router.route("/")
-  .post(protect, validateOrg, createOrganizationController)
-  .get(protect, getAllOrgsController);
+  .post(protect, assignmentMiddleware, permissionMiddleware("MANAGE_TENANTS"), upload.single("logo"), validateOrg, createOrganizationController)
+  .get(protect, assignmentMiddleware, permissionMiddleware("MANAGE_TENANTS"), getAllOrgsController);
 
 router.route("/:id")
-  .get(protect, getOrgByIdController);
+  .get(protect, assignmentMiddleware, getOrgByIdController);
 
 module.exports = router;

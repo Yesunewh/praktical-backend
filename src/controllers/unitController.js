@@ -1,9 +1,10 @@
 const unitService = require("../services/unitService");
+const { BRANCH_UNIT_BASELINE_ROLE_NAME } = require("../config/systemBaselineRoles");
 
 exports.createUnitType = async (req, res) => {
   try {
     let orgId = req.user.org_id;
-    if (req.user.user_type === "SUPERADMIN") {
+    if (req.user.isSuperAdmin) {
       orgId = req.body.org_id || req.query.org_id || orgId;
     }
     if (!orgId) {
@@ -20,7 +21,7 @@ exports.createUnitType = async (req, res) => {
 exports.updateUnitType = async (req, res) => {
   try {
     let orgId = req.user.org_id;
-    if (req.user.user_type === "SUPERADMIN") {
+    if (req.user.isSuperAdmin) {
       orgId = req.body.org_id || req.query.org_id || orgId;
     }
     if (!orgId) {
@@ -36,7 +37,7 @@ exports.updateUnitType = async (req, res) => {
 exports.getUnitTypes = async (req, res) => {
   try {
     // If SuperAdmin, orgId comes from query, else pulled from token
-    const orgId = req.user.user_type === "SUPERADMIN" ? req.query.org_id : req.user.org_id;
+    const orgId = req.user.isSuperAdmin ? req.query.org_id : req.user.org_id;
     if (!orgId) return res.status(400).json({ success: false, message: "org_id is required" });
 
     const types = await unitService.getUnitTypes(orgId);
@@ -49,7 +50,7 @@ exports.getUnitTypes = async (req, res) => {
 exports.createUnit = async (req, res) => {
   try {
     let orgId = req.user.org_id;
-    if (req.user.user_type === "SUPERADMIN") {
+    if (req.user.isSuperAdmin) {
       orgId = req.body.org_id || req.query.org_id || orgId;
     }
     if (!orgId) {
@@ -72,11 +73,11 @@ exports.createUnit = async (req, res) => {
 
 exports.getUnitsTree = async (req, res) => {
   try {
-    const orgId = req.user.user_type === "SUPERADMIN" ? req.query.org_id : req.user.org_id;
+    const orgId = req.user.isSuperAdmin ? req.query.org_id : req.user.org_id;
     if (!orgId) return res.status(400).json({ success: false, message: "org_id is required" });
 
     let tree = await unitService.getUnitsTree(orgId);
-    if (req.user.user_type === "UNIT_ADMIN") {
+    if (req.user.role?.name === BRANCH_UNIT_BASELINE_ROLE_NAME) {
       if (!req.user.unit_id) {
         return res.status(403).json({
           success: false,
@@ -95,7 +96,7 @@ exports.getUnitsTree = async (req, res) => {
 exports.updateUnit = async (req, res) => {
   try {
     let orgId = req.user.org_id;
-    if (req.user.user_type === "SUPERADMIN") {
+    if (req.user.isSuperAdmin) {
       orgId = req.body.org_id || req.query.org_id || orgId;
     }
     if (!orgId) {

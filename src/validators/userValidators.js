@@ -70,7 +70,6 @@ const userSchema = Joi.object({
       "string.min": "Password must be at least 6 characters long.",
       "any.required": "Password is required.",
     }),
-  user_type: Joi.string().valid("SUPERADMIN", "ORG_ADMIN", "UNIT_ADMIN", "DEPT_ADMIN", "STAFF", "EXTERNAL").optional(),
   org_id: uuidGuid(),
   dept_id: uuidGuid(),
   unit_id: uuidGuid(),
@@ -78,8 +77,11 @@ const userSchema = Joi.object({
   status: Joi.string().valid("UNASSIGNED", "ACTIVE", "DEACTIVATED").optional(),
 });
 
+const { User } = require("../models");
+const { Op } = require("sequelize");
+
 // Middleware to validate user data
-const validateUser = (req, res, next) => {
+const validateUser = async (req, res, next) => {
   normalizeRegistrationIds(req.body);
   normalizeRegistrationPhone(req.body);
   const { error } = userSchema.validate(req.body, { abortEarly: true });
@@ -107,6 +109,30 @@ const validateUser = (req, res, next) => {
 
     return res.status(400).json({ success: false, message });
   }
+
+  // Pre-check for Uniqueness (Phone, Email, Username)
+  const { phone_number, email, username } = req.body;
+  const existing = await User.findOne({
+    where: {
+      [Op.or]: [
+        { phone_number },
+        email ? { email } : null,
+        username ? { username } : null
+      ].filter(Boolean)
+    }
+  });
+
+  if (existing) {
+    let conflictField = "Phone number";
+    if (existing.email === email && email) conflictField = "Email";
+    if (existing.username === username && username) conflictField = "Username";
+    
+    return res.status(400).json({
+      success: false,
+      message: `${conflictField} is already registered to another account.`
+    });
+  }
+
   next();
 };
 const updateUserSchema = Joi.object({
@@ -366,13 +392,11 @@ const validateEmailAttributes = (req, res, next) => {
 const adminUserScopeSchema = Joi.object({
   org_id: uuidGuid(),
   dept_id: uuidGuid(),
-  user_type: Joi.string()
-    .valid("ORG_ADMIN", "UNIT_ADMIN", "DEPT_ADMIN", "STAFF", "EXTERNAL")
-    .optional(),
+  role_id: uuidGuid(),
 })
   .min(1)
   .messages({
-    "object.min": "At least one of org_id, dept_id, or user_type is required.",
+    "object.min": "At least one of org_id, dept_id, or role_id is required.",
   });
 
 const validateAdminUserScope = (req, res, next) => {

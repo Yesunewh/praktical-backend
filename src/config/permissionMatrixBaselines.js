@@ -130,17 +130,21 @@ const ALL_MATRIX_PERMISSION_NAMES = Object.freeze(
 );
 
 /** Tenant editors mapping to matrix admin columns ORG/Branch/Dept — learner preview perms locked in Role Management. */
-function shouldMatrixLockLearnerPreviewForEditor(requesterUserType) {
-  return ["ORG_ADMIN", "UNIT_ADMIN", "DEPT_ADMIN"].includes(String(requesterUserType || ""));
+function shouldMatrixLockLearnerPreviewForEditor(roleName) {
+  return [
+    ORG_ADMIN_BASELINE_ROLE_NAME,
+    BRANCH_UNIT_BASELINE_ROLE_NAME,
+    DEPT_ADMIN_BASELINE_ROLE_NAME,
+  ].includes(String(roleName || ""));
 }
 
 /**
  * Adds `matrix_locked_for_editor` to GET /permissions rows (Phase 2).
  * @param {Array<Record<string, unknown>>} rows Permission rows already filtered by allocations / tiers.
- * @param {string|null|undefined} requesterUserType
+ * @param {string|null|undefined} roleName
  */
-function applyMatrixLockedForEditorMetadata(rows, requesterUserType) {
-  const tierLocks = shouldMatrixLockLearnerPreviewForEditor(requesterUserType);
+function applyMatrixLockedForEditorMetadata(rows, roleName) {
+  const tierLocks = shouldMatrixLockLearnerPreviewForEditor(roleName);
   return rows.map((p) => ({
     ...p,
     matrix_locked_for_editor:

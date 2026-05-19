@@ -1,21 +1,22 @@
 const express = require("express");
 const router = express.Router();
 const unitController = require("../controllers/unitController");
-const { protect, authorize } = require("../middlewares/authMiddleware");
+const { protect, assignmentMiddleware, permissionMiddleware } = require("../middlewares/authMiddleware");
 
 // All unit operations require authentication, mostly administrative.
 router.use(protect);
+router.use(assignmentMiddleware);
 
 // Unit Types (Level definitions)
 router.post(
   "/types",
-  authorize("SUPERADMIN", "ORG_ADMIN"),
+  permissionMiddleware("MANAGE_TERMINOLOGY"),
   unitController.createUnitType
 );
 
 router.put(
   "/types/:id",
-  authorize("SUPERADMIN", "ORG_ADMIN"),
+  permissionMiddleware("MANAGE_TERMINOLOGY"),
   unitController.updateUnitType
 );
 
@@ -27,19 +28,19 @@ router.get(
 // Organizational Units (The actual branches/offices tree)
 router.post(
   "/",
-  authorize("SUPERADMIN", "ORG_ADMIN", "UNIT_ADMIN"),
+  permissionMiddleware("MANAGE_HIERARCHY"),
   unitController.createUnit
 );
 
 router.put(
   "/:id",
-  authorize("SUPERADMIN", "ORG_ADMIN", "UNIT_ADMIN"),
+  permissionMiddleware("MANAGE_HIERARCHY"),
   unitController.updateUnit
 );
 
 router.get(
   "/tree",
-  authorize("SUPERADMIN", "ORG_ADMIN", "UNIT_ADMIN"),
+  permissionMiddleware("VIEW_DASHBOARD"), // Hierarchy view usually tied to dashboard access
   unitController.getUnitsTree
 );
 

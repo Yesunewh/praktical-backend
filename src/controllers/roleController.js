@@ -2,14 +2,15 @@ const roleService = require("../services/roleService");
 
 exports.createCustomRole = async (req, res) => {
   try {
-    let orgId = req.user.user_type === "SUPERADMIN" ? req.body.org_id : req.user.org_id;
+    const isSuperAdmin = req.user.isSuperAdmin;
+    let orgId = isSuperAdmin ? req.body.org_id : req.user.org_id;
     if (orgId === "") orgId = null;
     const unitId = req.user.unit ? req.user.unit.id : null;
     const { name, description, permissionIds } = req.body;
 
     const role = await roleService.createCustomRole(orgId, unitId, name, description, permissionIds, {
-      isSuperadmin: req.user.user_type === "SUPERADMIN",
-      requesterUserType: req.user.user_type,
+      isSuperadmin: isSuperAdmin,
+      requesterRoleName: req.user.role?.name,
     });
     res.status(201).json({ success: true, data: role });
   } catch (error) {
@@ -19,10 +20,11 @@ exports.createCustomRole = async (req, res) => {
 
 exports.getRoles = async (req, res) => {
   try {
-    const orgId = req.user.user_type === "SUPERADMIN" ? req.query.org_id : req.user.org_id;
+    const isSuperAdmin = req.user.isSuperAdmin;
+    const orgId = isSuperAdmin ? req.query.org_id : req.user.org_id;
     const { includeSystem } = req.query; // boolean toggle
 
-    const roles = await roleService.getRoles(orgId, includeSystem !== "false", req.user.user_type);
+    const roles = await roleService.getRoles(orgId, includeSystem !== "false", req.user.role?.name);
     res.status(200).json({ success: true, data: roles });
   } catch (error) {
     res.status(400).json({ success: false, message: error.message });
@@ -31,8 +33,9 @@ exports.getRoles = async (req, res) => {
 
 exports.updateCustomRole = async (req, res) => {
   try {
+    const isSuperAdmin = req.user.isSuperAdmin;
     const orgIdForAccess =
-      req.user.user_type === "SUPERADMIN" ? req.body.org_id ?? req.user.org_id : req.user.org_id;
+      isSuperAdmin ? req.body.org_id ?? req.user.org_id : req.user.org_id;
     const unitId = req.user.unit ? req.user.unit.id : null;
     const { name, description, permissionIds } = req.body;
 
@@ -42,8 +45,8 @@ exports.updateCustomRole = async (req, res) => {
       orgIdForAccess,
       unitId,
       {
-        isSuperadmin: req.user.user_type === "SUPERADMIN",
-        requesterUserType: req.user.user_type,
+        isSuperadmin: isSuperAdmin,
+        requesterRoleName: req.user.role?.name,
       }
     );
     res.status(200).json({ success: true, data: role });

@@ -33,6 +33,9 @@ const protect = (req, res, next) => {
       // Correctly access the nested payload if it exists
       const tokenPayload = decoded.payload || decoded;
       const userId = tokenPayload.user_id;
+      if (!userId) {
+        return next(new AppError("Invalid token payload: user_id missing.", 401));
+      }
 
       // Fetch fresh user data to ensure the scope is fully populated
       const user = await User.findByPk(userId);
@@ -82,6 +85,13 @@ const levelGuard = (allowedLevels = []) => {
   };
 };
 
+const {
+  SUPER_ADMIN_BASELINE_ROLE_NAME,
+  ORG_ADMIN_BASELINE_ROLE_NAME,
+  DEPT_ADMIN_BASELINE_ROLE_NAME,
+  BRANCH_UNIT_BASELINE_ROLE_NAME,
+} = require("../config/systemBaselineRoles");
+
 const assignmentMiddleware = async (req, res, next) => {
   try {
     // `protect` attaches a Sequelize User as req.user (has user_id), not req.user.payload
@@ -99,13 +109,23 @@ const assignmentMiddleware = async (req, res, next) => {
       return next(new AppError("Account is deactivated", 403));
     }
 
-    if (user.user_type === "SUPERADMIN") {
+    // 1. Identify Platform Super Admin (isSuperAdmin)
+    // Condition: org_id is null AND assigned the 'Super Admin' role
+    const isPlatformAdmin = user.org_id === null;
+    const superAdminAssignment = await UserAssignment.findOne({
+      where: { user_id: user.user_id },
+      include: [{ model: Role, where: { name: SUPER_ADMIN_BASELINE_ROLE_NAME } }]
+    });
+
+    if (isPlatformAdmin && superAdminAssignment) {
       req.user = {
         id: user.user_id,
         user_id: user.user_id,
-        user_type: user.user_type,
+        org_id: null,
         status: user.status,
         isSuperAdmin: true,
+        role: { name: SUPER_ADMIN_BASELINE_ROLE_NAME },
+        permissions: [] // Will be loaded by next middleware or bypass
       };
       return next();
     }
@@ -120,8 +140,16 @@ const assignmentMiddleware = async (req, res, next) => {
       );
     }
 
+    // 2. Standard Branch/Unit Assignment
     const assignment = await UserAssignment.findOne({
       where: { user_id: user.user_id },
+      include: [
+        {
+          model: OrganizationalUnit,
+          include: [{ model: require("../models/unitTypeModel"), as: "Type", attributes: ["level"] }]
+        },
+        { model: Role, include: [{ model: Permission, attributes: ["name"] }] }
+      ]
     });
 
     if (!assignment) {
@@ -133,37 +161,35 @@ const assignmentMiddleware = async (req, res, next) => {
       );
     }
 
-    // 6️⃣ Load unit
-    const unit = await OrganizationalUnit.findByPk(assignment.unit_id);
-    if (!unit) {
-      return next(new AppError("Assigned unit not found", 500));
-    }
+    const unit = assignment.OrganizationalUnit;
+    // Removed strict throw here: An Organization Admin might not have a unit assigned yet
+    // if the organization hierarchy hasn't been built.
 
-    // 7️⃣ Load role
-    const role = await Role.findByPk(assignment.role_id);
+    const role = assignment.Role;
     if (!role) {
       return next(new AppError("Assigned role not found", 500));
     }
 
-    // 8️⃣ Attach context to request
+    // Attach full context to request
     req.user = {
       id: user.user_id,
+      user_id: user.user_id,
+      org_id: user.org_id,
+      dept_id: user.dept_id,
       status: user.status,
+      isSuperAdmin: false,
+      unit: unit ? unit.toJSON() : null,
+      unit_id: unit ? unit.id : null,
+      unit_level: unit?.Type?.level ?? null,  // null = top-level (safe default)
       assignment: {
         id: assignment.id,
-      },
-      unit: {
-        id: unit.id,
-        level: unit.level,
-        parent_id: unit.parent_id,
-        name: unit.name,
       },
       role: {
         id: role.id,
         name: role.name,
-      },
+        permissions: role.Permissions.map(p => p.name)
+      }
     };
-
 
     next();
   } catch (error) {
@@ -174,13 +200,13 @@ const assignmentMiddleware = async (req, res, next) => {
 const permissionMiddleware = (requiredPermissionName) => {
   return async (req, res, next) => {
     try {
-      if (req.user?.isSuperAdmin) {
-        return next();
+      if (req.user && req.user.isSuperAdmin) {
+        return next(); // SuperAdmin bypass
       }
 
       // 1️⃣ Ensure assignmentMiddleware ran
       if (!req.user || !req.user.assignment || !req.user.role) {
-        return next(new AppError("Unauthorized", 401));
+        return next(new AppError("Unauthorized: Missing user assignment context", 401));
       }
 
       const assignmentId = req.user.assignment.id;
@@ -239,10 +265,17 @@ const permissionMiddleware = (requiredPermissionName) => {
 
 
 
+
 const authorize = (...roles) => {
   return (req, res, next) => {
-    if (!req.user || !roles.includes(req.user.user_type)) {
-      return next(new AppError(`Access Denied: Requires one of ${roles.join(", ")}`, 403));
+    const actorRoleName = req.user?.role?.name;
+    const isSuperAdmin = req.user?.isSuperAdmin;
+    
+    // Check if the actor's role name is in the allowed list, or if they are a superadmin
+    const isAuthorized = roles.includes(actorRoleName) || (isSuperAdmin && roles.includes(SUPER_ADMIN_BASELINE_ROLE_NAME));
+
+    if (!req.user || !isAuthorized) {
+      return next(new AppError("Access Denied: You do not have the required permissions to perform this action.", 403));
     }
     next();
   };
@@ -264,7 +297,12 @@ const bootstrapOrProtect = (req, res, next) => {
 /** Pair with `bootstrapOrProtect`. Skips role check only for `allowFirstAdminBootstrap`. */
 const authorizeAdminsExceptBootstrap = (req, res, next) => {
   if (req.allowFirstAdminBootstrap) return next();
-  return authorize("SUPERADMIN", "ORG_ADMIN", "DEPT_ADMIN", "UNIT_ADMIN")(req, res, next);
+  return authorize(
+    SUPER_ADMIN_BASELINE_ROLE_NAME,
+    ORG_ADMIN_BASELINE_ROLE_NAME,
+    DEPT_ADMIN_BASELINE_ROLE_NAME,
+    BRANCH_UNIT_BASELINE_ROLE_NAME
+  )(req, res, next);
 };
 
 module.exports = {
