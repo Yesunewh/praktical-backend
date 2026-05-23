@@ -33,6 +33,8 @@ const LearningChallenge = sequelize.define(
     reputation_reward: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
     steps: { type: DataTypes.JSONB, allowNull: false, defaultValue: [] },
     is_active: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
+    languageCode: { type: DataTypes.STRING(10), allowNull: false, defaultValue: "en" },
+    translationGroupId: { type: DataTypes.STRING(64), allowNull: true },
   },
   {
     timestamps: true,

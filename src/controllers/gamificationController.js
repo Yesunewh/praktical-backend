@@ -317,6 +317,18 @@ const topRatedChallenges = async (req, res, next) => {
   }
 };
 
+const getTranslationGroup = async (req, res, next) => {
+  try {
+    const challenges = await gamificationService.getChallengesByTranslationGroup(
+      req.params.groupId,
+      req.user
+    );
+    res.json({ success: true, challenges });
+  } catch (e) {
+    next(e);
+  }
+};
+
 module.exports = {
   listChallenges,
   getChallenge,
@@ -341,4 +353,5 @@ module.exports = {
   adminTrainingSummary,
   getAssignmentReport,
   topRatedChallenges,
+  getTranslationGroup,
 };

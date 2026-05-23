@@ -66,6 +66,8 @@ function toFrontendChallenge(row) {
     difficulty: plain.difficulty,
     category: plain.category,
     steps: plain.steps || [],
+    languageCode: plain.languageCode || 'en',
+    translationGroupId: plain.translationGroupId || null,
   };
 }
 
@@ -371,6 +373,20 @@ async function getChallengeById(id, viewer) {
   const passedSet = await getPassedChallengeIdSet(uid);
   const lock = evaluateProgressionLockForChallenge(row.get({ plain: true }), plainAll, passedSet);
   return { ...base, ...lock };
+}
+
+/** Returns all active challenges that share the same translationGroupId. */
+async function getChallengesByTranslationGroup(groupId, viewer) {
+  if (!groupId) throw new AppError("groupId is required", 400);
+  const rows = await LearningChallenge.findAll({
+    where: { translationGroupId: groupId, is_active: true },
+    order: [["languageCode", "ASC"]],
+  });
+  // Filter by visibility if viewer supplied
+  const visible = viewer
+    ? rows.filter((r) => userCanAccessChallenge(viewer, r))
+    : rows;
+  return visible.map(toFrontendChallenge);
 }
 
 async function completeChallenge(userId, challengeId, body) {
@@ -786,6 +802,8 @@ async function upsertChallenge(data, isUpdate = false, author = null) {
     reputation_reward: base.reputationReward ?? base.reputation_reward ?? 0,
     steps: base.steps || [],
     is_active: base.is_active !== false,
+    languageCode: base.languageCode || "en",
+    translationGroupId: base.translationGroupId || null,
   };
 
   if (author) await assertAuthorCanUpsertChallenge(author, payload, existingRow);
@@ -1759,4 +1777,5 @@ module.exports = {
   deleteTrainingAssignment,
   getAssignmentDetailedReport,
   triggerAssignmentsForUser,
+  getChallengesByTranslationGroup,
 };

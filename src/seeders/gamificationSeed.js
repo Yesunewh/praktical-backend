@@ -14,6 +14,8 @@ async function seedGamification() {
     return;
   }
 
+  // Skip seeding challenge list as requested
+  /*
   for (const c of challenges) {
     await LearningChallenge.upsert({
       id: String(c.id),
@@ -30,6 +32,7 @@ async function seedGamification() {
       is_active: true,
     });
   }
+  */
 
   for (const a of achievements || []) {
     await GamificationAchievement.upsert({
@@ -69,7 +72,7 @@ async function seedGamification() {
     }
   }
 
-  console.log(`Gamification seed: ${challenges.length} challenges, ${(achievements || []).length} achievements, ${defaultCategories.length} categories`);
+  console.log(`Gamification seed: 0 challenges seeded, ${(achievements || []).length} achievements, ${defaultCategories.length} categories`);
 }
 
 module.exports = seedGamification;

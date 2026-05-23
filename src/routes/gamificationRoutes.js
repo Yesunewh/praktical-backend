@@ -24,6 +24,7 @@ const {
   removeCategory,
   rateChallenge,
   topRatedChallenges,
+  getTranslationGroup,
 } = require("../controllers/gamificationController");
 const { protect, assignmentMiddleware, permissionMiddleware } = require("../middlewares/authMiddleware");
 const { upload } = require("../middlewares/uploadMiddleware");
@@ -37,6 +38,7 @@ router.put("/categories/:id", permissionMiddleware("MANAGE_CHALLENGES"), upload.
 router.delete("/categories/:id", permissionMiddleware("MANAGE_CHALLENGES"), removeCategory);
 router.get("/challenges", listChallenges);
 router.get("/challenges/:id", getChallenge);
+router.get("/translation-group/:groupId", getTranslationGroup);
 router.post("/challenges/:id/rate", rateChallenge);
 router.post("/challenges/:id/complete", completeChallenge);
 router.get(
